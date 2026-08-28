@@ -1530,7 +1530,16 @@ class FanCurveGraph(Gtk.DrawingArea):
         lo = self.points[i - 1][0] + 1 if i > 0 else self.TEMP_MIN
         hi = self.points[i + 1][0] - 1 if i < len(self.points) - 1 else self.TEMP_MAX
         temp = max(lo, min(hi, round(temp)))
-        speed = max(self.SPEED_MIN, min(self.SPEED_MAX, round(speed)))
+        # asusctl rejects a curve where speed isn't monotonically
+        # non-decreasing with temperature ("Invalid percentage, previous
+        # value X is higher than next value Y") -- confirmed directly, and
+        # only the temp axis was being clamped between neighbours before,
+        # so dragging a point's speed above a later point's (or below an
+        # earlier one's) silently produced a curve the backend would refuse
+        # to apply, surfacing as an unexplained "Fan curve failed" toast.
+        speed_lo = self.points[i - 1][1] if i > 0 else self.SPEED_MIN
+        speed_hi = self.points[i + 1][1] if i < len(self.points) - 1 else self.SPEED_MAX
+        speed = max(speed_lo, min(speed_hi, round(speed)))
         self.points[i] = (int(temp), int(speed))
         self.queue_draw()
         if self.on_point_selected:
@@ -1672,8 +1681,20 @@ class FanCurveEditor(Gtk.Box):
         return False
 
     def _reset(self, _btn):
+        # asusctl's own --help is explicit that --default resets "the active
+        # profile's fan curve" -- --mod-profile is accepted alongside it but
+        # silently ignored for this specific operation (confirmed directly:
+        # running --mod-profile Quiet --default while Performance was active
+        # left Quiet's curve completely untouched). Refuse rather than
+        # silently resetting the wrong (active) profile when the one being
+        # edited here isn't it.
+        profile = self.get_profile()
+        active = read_sysfs(PLATFORM_PROFILE_PATH, "").capitalize()
+        if profile != active:
+            self.toast_cb(f"Can't reset {profile}'s curve: only the active profile ({active}) can be reset to default")
+            return
         run_cmd(
-            ["asusctl", "fan-curve", "--mod-profile", self.get_profile(), "--fan", self.fan, "--default"],
+            ["asusctl", "fan-curve", "--mod-profile", profile, "--fan", self.fan, "--default"],
             lambda ok, err: (self.load_curve() if ok else self.toast_cb(f"Reset failed: {err[:80]}")),
         )
 
@@ -1686,9 +1707,11 @@ class FansPowerWindow(Adw.Window):
     live value with no per-profile storage to switch between -- and they read as
     "unavailable" on this exact G733ZW regardless, so the whole block just hides."""
 
-    def __init__(self, app, toast_cb):
+    def __init__(self, app, toast_cb, cfg, save_cfg):
         super().__init__(application=app)
         self.toast_cb = toast_cb
+        self.limits_cfg = cfg["power_limits"]
+        self.save_cfg = save_cfg
         # Bigger than before -- the previous 440x620 was cramped enough that
         # slider value labels (e.g. "PL1 ... 10W") were getting clipped at
         # the right edge, reported directly as "not scaled properly".
@@ -1920,6 +1943,19 @@ class FansPowerWindow(Adw.Window):
         self.cpu_fan.load_curve()
         self.gpu_fan.load_curve()
 
+    def _sync_slider(self, slider, sysfs_path, cfg_key):
+        """Prefer the real hardware reading; when there isn't one (firmware
+        reports the attribute unavailable), fall back to whatever the user
+        last set here rather than the slider's construction-time default --
+        this window is destroyed and rebuilt fresh every time it's closed
+        and reopened, so without this the slider always reset and looked
+        like "everything resets" even within the same run of the app."""
+        value = read_sysfs_int(sysfs_path)
+        if value is not None:
+            slider.scale.set_value(value)
+        elif self.limits_cfg[cfg_key] is not None:
+            slider.scale.set_value(self.limits_cfg[cfg_key])
+
     def refresh_power_limits(self):
         # Only fast, synchronous sysfs reads happen directly here -- everything
         # that shells out (power-profiles-daemon, nvidia-settings, nvidia-smi)
@@ -1933,19 +1969,11 @@ class FansPowerWindow(Adw.Window):
         # "unavailable"), the slider just keeps whatever it's already at and
         # stays fully interactive, rather than the row disappearing.
         self._suppress = True
-        pl1 = read_sysfs_int(PPT_PL1_PATH)
-        pl2 = read_sysfs_int(PPT_PL2_PATH)
-        if pl1 is not None:
-            self.pl1.scale.set_value(pl1)
-        if pl2 is not None:
-            self.pl2.scale.set_value(pl2)
-
-        boost = read_sysfs_int(NV_BOOST_PATH)
-        temp = read_sysfs_int(NV_TEMP_TARGET_PATH)
-        if boost is not None:
-            self.boost.scale.set_value(boost)
-        if temp is not None:
-            self.temp_target.scale.set_value(temp)
+        self._sync_slider(self.pl1, PPT_PL1_PATH, "pl1")
+        self._sync_slider(self.pl2, PPT_PL2_PATH, "pl2")
+        self._sync_slider(self.boost, NV_BOOST_PATH, "boost")
+        self._sync_slider(self.temp_target, NV_TEMP_TARGET_PATH, "temp_target")
+        self.apply_limits_row.switch.set_active(self.limits_cfg["apply_limits"])
         self._suppress = False
 
         self._refresh_power_mode_async()
@@ -2003,13 +2031,19 @@ class FansPowerWindow(Adw.Window):
         # and whether the "may not work here" note shows, never whether the
         # slider itself exists.
         self._suppress = True
-        self.core_clock.scale.set_value(0)
-        self.mem_clock.scale.set_value(0)
+        # nvidia-settings can't even *read* these back on this session (only
+        # fail to write), so 0 was always used as a hardcoded reset -- same
+        # "everything resets" complaint as PL1/PL2, fall back to whatever the
+        # user last set instead.
+        self.core_clock.scale.set_value(self.limits_cfg["core_clock"] or 0)
+        self.mem_clock.scale.set_value(self.limits_cfg["mem_clock"] or 0)
 
         if self._nvidia_power_bounds is not None:
             cur, lo, hi = self._nvidia_power_bounds
             self.gpu_power.scale.set_range(lo, hi)
             self.gpu_power.scale.set_value(cur)
+        elif self.limits_cfg["gpu_power"] is not None:
+            self.gpu_power.scale.set_value(self.limits_cfg["gpu_power"])
 
         self.gpu_unsupported_notice.set_visible(not (self._nvidia_clock_ok or self._nvidia_power_ok))
         self._suppress = False
@@ -2027,7 +2061,10 @@ class FansPowerWindow(Adw.Window):
         self._pl1_debouncer.trigger()
 
     def _apply_pl1(self):
-        run_cmd(["asusctl", "armoury", "set", "ppt_pl1_spl", str(int(self.pl1.scale.get_value()))], self._report)
+        value = int(self.pl1.scale.get_value())
+        self.limits_cfg["pl1"] = value
+        self.save_cfg()
+        run_cmd(["asusctl", "armoury", "set", "ppt_pl1_spl", str(value)], self._report)
 
     def _on_pl2_changed(self, scale):
         if self._suppress:
@@ -2035,7 +2072,10 @@ class FansPowerWindow(Adw.Window):
         self._pl2_debouncer.trigger()
 
     def _apply_pl2(self):
-        run_cmd(["asusctl", "armoury", "set", "ppt_pl2_sppt", str(int(self.pl2.scale.get_value()))], self._report)
+        value = int(self.pl2.scale.get_value())
+        self.limits_cfg["pl2"] = value
+        self.save_cfg()
+        run_cmd(["asusctl", "armoury", "set", "ppt_pl2_sppt", str(value)], self._report)
 
     def _on_core_clock_changed(self, scale):
         if self._suppress:
@@ -2043,7 +2083,10 @@ class FansPowerWindow(Adw.Window):
         self._core_clock_debouncer.trigger()
 
     def _apply_core_clock(self):
-        apply_core_clock_offset(int(self.core_clock.scale.get_value()), self._report)
+        value = int(self.core_clock.scale.get_value())
+        self.limits_cfg["core_clock"] = value
+        self.save_cfg()
+        apply_core_clock_offset(value, self._report)
 
     def _on_mem_clock_changed(self, scale):
         if self._suppress:
@@ -2051,7 +2094,10 @@ class FansPowerWindow(Adw.Window):
         self._mem_clock_debouncer.trigger()
 
     def _apply_mem_clock(self):
-        apply_mem_clock_offset(int(self.mem_clock.scale.get_value()), self._report)
+        value = int(self.mem_clock.scale.get_value())
+        self.limits_cfg["mem_clock"] = value
+        self.save_cfg()
+        apply_mem_clock_offset(value, self._report)
 
     def _on_gpu_power_changed(self, scale):
         if self._suppress:
@@ -2059,7 +2105,10 @@ class FansPowerWindow(Adw.Window):
         self._gpu_power_debouncer.trigger()
 
     def _apply_gpu_power(self):
-        apply_gpu_power_limit(self.gpu_power.scale.get_value(), self._report)
+        value = self.gpu_power.scale.get_value()
+        self.limits_cfg["gpu_power"] = value
+        self.save_cfg()
+        apply_gpu_power_limit(value, self._report)
 
     def _on_boost_changed(self, scale):
         if self._suppress:
@@ -2067,7 +2116,10 @@ class FansPowerWindow(Adw.Window):
         self._boost_debouncer.trigger()
 
     def _apply_boost(self):
-        run_cmd(["asusctl", "armoury", "set", "nv_dynamic_boost", str(int(self.boost.scale.get_value()))], self._report)
+        value = int(self.boost.scale.get_value())
+        self.limits_cfg["boost"] = value
+        self.save_cfg()
+        run_cmd(["asusctl", "armoury", "set", "nv_dynamic_boost", str(value)], self._report)
 
     def _on_temp_changed(self, scale):
         if self._suppress:
@@ -2075,9 +2127,16 @@ class FansPowerWindow(Adw.Window):
         self._temp_debouncer.trigger()
 
     def _apply_temp(self):
-        run_cmd(["asusctl", "armoury", "set", "nv_temp_target", str(int(self.temp_target.scale.get_value()))], self._report)
+        value = int(self.temp_target.scale.get_value())
+        self.limits_cfg["temp_target"] = value
+        self.save_cfg()
+        run_cmd(["asusctl", "armoury", "set", "nv_temp_target", str(value)], self._report)
 
     def _on_apply_limits_toggled(self, switch, state):
+        if self._suppress:
+            return False
+        self.limits_cfg["apply_limits"] = state
+        self.save_cfg()
         return False
 
     def _report(self, ok, err):
@@ -2330,6 +2389,8 @@ class RogPopup(Adw.Window):
         self.set_title("ROG Control")
         self.set_resizable(False)
         self._on_quit = on_quit
+        self.cfg = cfg
+        self.save_cfg = save_cfg
 
         self.toast_overlay = Adw.ToastOverlay()
         self.set_content(self.toast_overlay)
@@ -2373,7 +2434,7 @@ class RogPopup(Adw.Window):
 
     def open_fans(self):
         if self.fans_window is None:
-            self.fans_window = FansPowerWindow(self.get_application(), self.show_toast)
+            self.fans_window = FansPowerWindow(self.get_application(), self.show_toast, self.cfg, self.save_cfg)
             self.fans_window.connect("close-request", lambda *_a: self._forget("fans_window"))
         self.fans_window.refresh()
         self.fans_window.present()

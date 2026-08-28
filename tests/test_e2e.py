@@ -241,6 +241,82 @@ class TestNvidiaSmiExitCodeLie(unittest.TestCase):
         self.assertTrue(ok)
 
 
+class TestFanCurveGraphMonotonicSpeed(unittest.TestCase):
+    """Regression test: asusctl rejects a fan curve where speed isn't
+    monotonically non-decreasing with temperature ("Invalid percentage,
+    previous value X is higher than next value Y", confirmed directly against
+    the real asusctl binary). Dragging a point must clamp its speed between
+    its neighbours, the same way temperature is already clamped, or the user
+    can produce a curve that silently fails to apply."""
+
+    def test_drag_cannot_produce_non_monotonic_speed(self):
+        graph = main.FanCurveGraph()
+        graph.points = [(40, 20), (50, 30), (55, 40), (60, 50), (65, 60), (70, 75), (80, 90), (95, 100)]
+        graph._dragging = 2  # the (55, 40) point
+        graph._drag_origin = (0, 0)
+        w, h = 400, 220
+
+        def fake_geometry():
+            return w, h
+        graph._geometry = fake_geometry
+
+        # Try to drag point 2's speed to 95% -- far above its neighbours (30,
+        # 50) -- by feeding _from_px a pixel position that would decode to a
+        # very high speed if unclamped.
+        with mock.patch.object(main.FanCurveGraph, "_from_px", return_value=(55, 95)):
+            graph._on_drag_update(None, 0, 0)
+
+        temp, speed = graph.points[2]
+        prev_speed = graph.points[1][1]
+        next_speed = graph.points[3][1]
+        self.assertLessEqual(speed, next_speed, "point's speed was allowed above the next point's speed")
+        self.assertGreaterEqual(speed, prev_speed, "point's speed was allowed below the previous point's speed")
+
+    def test_resulting_curve_is_accepted_by_the_real_monotonic_check(self):
+        """Belt-and-suspenders: build a curve via the same clamp logic and
+        confirm it's actually well-formed (non-decreasing pwm alongside
+        non-decreasing temp), independent of asusctl being installed."""
+        graph = main.FanCurveGraph()
+        points = [(40, 20), (50, 30), (55, 40), (60, 50), (65, 60), (70, 75), (80, 90), (95, 100)]
+        graph.points = list(points)
+        for i in range(len(points)):
+            graph._dragging = i
+            graph._drag_origin = (0, 0)
+            graph._geometry = lambda: (400, 220)
+            with mock.patch.object(main.FanCurveGraph, "_from_px", return_value=(points[i][0], 999)):
+                graph._on_drag_update(None, 0, 0)
+        speeds = [s for _t, s in graph.points]
+        self.assertEqual(speeds, sorted(speeds), "curve produced by dragging every point to the max is not monotonic")
+
+
+class TestFactoryDefaultsOnlyResetsActiveProfile(unittest.TestCase):
+    """Regression test: `asusctl fan-curve --default` only ever resets the
+    *currently active* profile's curve -- `--mod-profile` is accepted
+    alongside it but silently ignored for this specific operation (confirmed
+    directly: running `--mod-profile Quiet --default` while Performance was
+    active left Quiet's curve completely untouched). The editor must refuse
+    rather than send a --default call that would silently reset the wrong
+    (active) profile instead of the one actually being edited."""
+
+    def test_refuses_when_edited_profile_is_not_active(self):
+        calls = []
+        editor = main.FanCurveEditor("cpu", lambda *_a: None, lambda: "Quiet")
+        editor.toast_cb = lambda msg: calls.append(msg)
+        with mock.patch.object(main, "read_sysfs", return_value="performance"), \
+             mock.patch.object(main, "run_cmd") as run_cmd_mock:
+            editor._reset(None)
+        run_cmd_mock.assert_not_called()
+        self.assertTrue(calls and "Quiet" in calls[0] and "Performance" in calls[0])
+
+    def test_proceeds_when_edited_profile_is_active(self):
+        editor = main.FanCurveEditor("cpu", lambda *_a: None, lambda: "Performance")
+        with mock.patch.object(main, "read_sysfs", return_value="performance"), \
+             mock.patch.object(main, "run_cmd") as run_cmd_mock:
+            editor._reset(None)
+        run_cmd_mock.assert_called_once()
+        self.assertIn("--default", run_cmd_mock.call_args[0][0])
+
+
 class TestFanCurveParsing(unittest.TestCase):
     """Regression test for the --get-enabled-ignores-profile bug: the parser
     must read the RON-ish `--mod-profile <Name>` output format correctly."""
@@ -316,11 +392,11 @@ class TestConfigPersistence(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 def make_cfg():
-    return {"automation": {
-        "gpu_optimized": False, "screen_auto": False,
-        "profile_battery": None, "profile_ac": None,
-        "kbd_battery": None, "kbd_ac": None,
-    }}
+    # Delegates to the real default-merging logic instead of hand-duplicating
+    # the schema here -- a hand-duplicated copy is exactly what went stale
+    # and broke every FansPowerWindow-constructing test the moment
+    # config.DEFAULTS grew a new "power_limits" section.
+    return config._merge_defaults({}, config.DEFAULTS)
 
 
 class TestWidgetConstruction(unittest.TestCase):
@@ -352,7 +428,7 @@ class TestWidgetConstruction(unittest.TestCase):
         main.FooterPanel(lambda: None, lambda: None)
 
     def test_fans_power_window(self):
-        win = main.FansPowerWindow(None, self.toast_cb)
+        win = main.FansPowerWindow(None, self.toast_cb, self.cfg, self.save_cb)
         pump(400)  # let async nvidia probes + power-mode fetch settle
         self.assertIsNotNone(win)
 
@@ -400,7 +476,7 @@ class TestModeSelectorVisibility(unittest.TestCase):
     inside whichever fan sub-page is actually visible."""
 
     def test_hidden_on_power_shown_on_fan_curve(self):
-        win = main.FansPowerWindow(None, lambda *_a: None)
+        win = main.FansPowerWindow(None, lambda *_a: None, make_cfg(), lambda: None)
         pump(50)
         self.assertFalse(win.mode_row.get_visible())
 
@@ -423,7 +499,7 @@ class TestSliderDebounce(unittest.TestCase):
     def test_pl1_rapid_drag_sends_one_command(self):
         calls = []
         with mock.patch.object(main, "run_cmd", side_effect=lambda cmd, on_done=None: calls.append(cmd)):
-            win = main.FansPowerWindow(None, lambda *_a: None)
+            win = main.FansPowerWindow(None, lambda *_a: None, make_cfg(), lambda: None)
             pump(50)
             win._suppress = False
             for v in range(10, 40):
@@ -471,6 +547,50 @@ class TestRgbDebounceAndPreservation(unittest.TestCase):
         self.assertTrue(effect_calls, "reset-to-theme sent no command at all")
         self.assertEqual(effect_calls[-1][3], "static", "should have switched to an effect that uses colour")
         self.assertIn(main.theme_primary_hex(), effect_calls[-1])
+
+
+class TestPowerLimitsPersistAcrossReopen(unittest.TestCase):
+    """Regression test: PL1/PL2/boost/temp_target/core_clock/mem_clock/
+    gpu_power/apply_limits have no real hardware value to read back on this
+    laptop, and FansPowerWindow is destroyed and rebuilt fresh every time
+    it's closed and reopened -- without saving the user's last-set value to
+    config, the sliders always reset to their construction default, reported
+    directly as "I applied power limits to max but everything resets"."""
+
+    def test_pl1_value_survives_window_close_and_reopen(self):
+        cfg = config._merge_defaults({}, config.DEFAULTS)
+        saved = []
+        save_cb = lambda: saved.append(json.loads(json.dumps(cfg)))  # deep-ish snapshot
+
+        with mock.patch.object(main, "run_cmd"):
+            win1 = main.FansPowerWindow(None, lambda *_a: None, cfg, save_cb)
+            pump(50)
+            win1._suppress = False
+            win1.pl1.scale.set_value(77)
+            pump(300)  # let the debounced apply (which persists) fire
+
+            self.assertEqual(cfg["power_limits"]["pl1"], 77)
+
+            # Simulate close+reopen: a brand new instance, same cfg dict --
+            # exactly what RogPopup.open_fans() does (fans_window set to
+            # None on close, rebuilt on next open).
+            win2 = main.FansPowerWindow(None, lambda *_a: None, cfg, save_cb)
+            pump(50)
+
+        self.assertEqual(win2.pl1.scale.get_value(), 77, "PL1 reset instead of restoring the last-set value")
+
+    def test_apply_limits_switch_persists(self):
+        cfg = config._merge_defaults({}, config.DEFAULTS)
+        with mock.patch.object(main, "run_cmd"):
+            win1 = main.FansPowerWindow(None, lambda *_a: None, cfg, lambda: None)
+            pump(50)
+            win1._suppress = False
+            win1._on_apply_limits_toggled(win1.apply_limits_row.switch, True)
+            self.assertTrue(cfg["power_limits"]["apply_limits"])
+
+            win2 = main.FansPowerWindow(None, lambda *_a: None, cfg, lambda: None)
+            pump(50)
+        self.assertTrue(win2.apply_limits_row.switch.get_active())
 
 
 class TestBatteryScaleRange(unittest.TestCase):

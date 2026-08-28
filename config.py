@@ -20,6 +20,25 @@ DEFAULTS = {
         "kbd_battery": None,
         "kbd_ac": None,
     },
+    # PL1/PL2/GPU boost/temp target/clock offsets have no real hardware value
+    # to read back on this laptop (firmware reports them "unavailable"), so
+    # unlike everything else in this app they can't be re-synced live from
+    # sysfs -- the Fans+Power window is also destroyed and rebuilt fresh on
+    # every close/reopen (see FansPowerWindow's callers), so without saving
+    # the last value a user picked here, the sliders always reset to their
+    # construction-time default and it looks like "everything resets" even
+    # within the same run of the app. None means "nothing saved yet, use the
+    # slider's own default".
+    "power_limits": {
+        "pl1": None,
+        "pl2": None,
+        "apply_limits": False,
+        "boost": None,
+        "temp_target": None,
+        "core_clock": None,
+        "mem_clock": None,
+        "gpu_power": None,
+    },
 }
 
 
