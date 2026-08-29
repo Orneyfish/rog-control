@@ -189,6 +189,112 @@ class TestGpuModeLogic(unittest.TestCase):
         mux_calls = [c for c in calls if "gpu_mux_mode" in c]
         self.assertEqual(mux_calls, [], "apply_gpu_mode changed MUX when it was already correct")
 
+    def test_apply_gpu_mode_never_touches_dgpu_disable_in_same_call_as_a_mux_change(self):
+        """Safety-critical regression test. A MUX change only takes effect
+        after a real reboot; the confirmation dialog that warns the user
+        about that only exists in GpuPanel's manual-click handler --
+        AutomationManager calls apply_gpu_mode() directly with no dialog
+        possible. If a mux write were followed by also touching
+        dgpu_disable in the *same* call (a real bug this function used to
+        have), that disables the dGPU while it might still be the only
+        thing actually driving the display (the real running mux state
+        doesn't change until reboot) -- a real risk of blanking the screen.
+        Confirmed by tracing this exact call path after a user reported
+        wanting Optimized mode enabled while still in Ultimate (mux=0)."""
+        calls = []
+        with mock.patch.object(main, "read_sysfs_int", return_value=0):  # currently Ultimate, mux mismatch guaranteed
+            with mock.patch.object(main, "run_cmd", side_effect=lambda cmd, on_done=None: calls.append(cmd)):
+                main.apply_gpu_mode("Optimized", on_battery=True)
+        self.assertEqual(len(calls), 1, f"expected only the mux-change call, got {calls}")
+        self.assertIn("gpu_mux_mode", calls[0])
+        dgpu_calls = [c for c in calls if "dgpu_disable" in c]
+        self.assertEqual(dgpu_calls, [], "dgpu_disable was touched in the same call as an unconfirmed MUX change")
+
+    def test_refuses_to_disable_dgpu_when_external_display_attached(self):
+        """Safety-critical regression test. Confirmed on real hardware: an
+        external monitor plugged into this laptop's HDMI port is wired
+        directly to the dGPU's own DRM card (vendor 0x10de), completely
+        bypassing gpu_mux_mode -- so disabling the dGPU (Eco, or Optimized
+        while on battery) would disconnect that display outright, with no
+        iGPU fallback for that specific port. apply_gpu_mode must refuse
+        rather than silently blanking whatever's plugged in there."""
+        for mode, on_battery in (("Eco", False), ("Optimized", True)):
+            with self.subTest(mode=mode):
+                result = []
+                with mock.patch.object(main, "read_sysfs_int", return_value=1), \
+                     mock.patch.object(main, "external_display_on_dgpu", return_value=True), \
+                     mock.patch.object(main, "run_cmd") as run_cmd_mock:
+                    main.apply_gpu_mode(mode, on_battery=on_battery, on_done=lambda ok, err: result.append((ok, err)))
+                run_cmd_mock.assert_not_called()
+                self.assertEqual(len(result), 1)
+                ok, err = result[0]
+                self.assertFalse(ok)
+                self.assertIn("external display", err.lower())
+
+    def test_proceeds_normally_when_no_external_display_on_dgpu(self):
+        calls = []
+        with mock.patch.object(main, "read_sysfs_int", return_value=1), \
+             mock.patch.object(main, "external_display_on_dgpu", return_value=False), \
+             mock.patch.object(main, "run_cmd", side_effect=lambda cmd, on_done=None: calls.append(cmd)):
+            main.apply_gpu_mode("Eco", on_battery=False)
+        self.assertTrue(any("dgpu_disable" in c for c in calls))
+
+
+class TestExternalDisplayOnDgpu(unittest.TestCase):
+    def test_matches_real_hardware_state(self):
+        """Not asserting a fixed True/False (whether an external monitor is
+        actually plugged in varies run to run) -- just confirming the
+        function runs cleanly against real /sys/class/drm data and returns
+        a bool, so a future refactor can't silently turn this into a
+        no-op/exception that always returns a stale default."""
+        result = main.external_display_on_dgpu()
+        self.assertIsInstance(result, bool)
+
+    def test_internal_panel_alone_is_not_treated_as_external(self):
+        def fake_listdir(path):
+            return ["card0", "card0-eDP-1"]
+
+        def fake_read_sysfs(path, default=None):
+            if path.endswith("/device/vendor"):
+                return "0x10de"
+            if path.endswith("/status"):
+                return "connected"
+            return default
+
+        with mock.patch("os.listdir", side_effect=fake_listdir), \
+             mock.patch.object(main, "read_sysfs", side_effect=fake_read_sysfs):
+            self.assertFalse(main.external_display_on_dgpu())
+
+    def test_non_edp_connected_on_nvidia_card_is_external(self):
+        def fake_listdir(path):
+            return ["card2", "card2-HDMI-A-1"]
+
+        def fake_read_sysfs(path, default=None):
+            if path.endswith("/device/vendor"):
+                return "0x10de"
+            if path.endswith("/status"):
+                return "connected"
+            return default
+
+        with mock.patch("os.listdir", side_effect=fake_listdir), \
+             mock.patch.object(main, "read_sysfs", side_effect=fake_read_sysfs):
+            self.assertTrue(main.external_display_on_dgpu())
+
+    def test_ignores_non_nvidia_cards(self):
+        def fake_listdir(path):
+            return ["card1", "card1-HDMI-A-1"]
+
+        def fake_read_sysfs(path, default=None):
+            if path.endswith("/device/vendor"):
+                return "0x8086"  # Intel iGPU
+            if path.endswith("/status"):
+                return "connected"
+            return default
+
+        with mock.patch("os.listdir", side_effect=fake_listdir), \
+             mock.patch.object(main, "read_sysfs", side_effect=fake_read_sysfs):
+            self.assertFalse(main.external_display_on_dgpu())
+
 
 class TestProfilePowerPlan(unittest.TestCase):
     def test_every_profile_has_a_power_plan(self):

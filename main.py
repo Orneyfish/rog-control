@@ -580,19 +580,38 @@ def gpu_mode_needs_reboot(mode):
 
 
 def apply_gpu_mode(mode, on_battery, on_done=None):
-    def after_mux(ok, err):
-        if not ok or mode == "Ultimate":
-            if on_done:
-                on_done(ok, err)
-            return
-        disable = "1" if (mode == "Eco" or (mode == "Optimized" and on_battery)) else "0"
-        run_cmd(["asusctl", "armoury", "set", "dgpu_disable", disable], on_done)
-
-    target_mux = "0" if mode == "Ultimate" else "1"
-    if read_sysfs_int(GPU_MUX_PATH) == int(target_mux):
-        after_mux(True, "")
-    else:
-        run_cmd(["asusctl", "armoury", "set", "gpu_mux_mode", target_mux], after_mux)
+    # Safety-critical: a MUX change only takes effect after an actual reboot
+    # (that's the whole reason gpu_mode_needs_reboot()/the confirmation
+    # dialog exist), but that dialog lives only in GpuPanel's manual-click
+    # handler -- AutomationManager calls this function directly, with no
+    # dialog possible from a background component. If a mux write were
+    # followed by immediately also touching dgpu_disable in the same call
+    # (as an earlier version of this function did), that would disable the
+    # dGPU while it might *still* be the only thing driving the display
+    # (the real running mux state doesn't change until reboot) -- a real
+    # risk of blanking the screen. So: when a mux change is actually needed,
+    # do ONLY that and stop; dgpu_disable is only ever touched once the real
+    # mux already matches the target (i.e. after the user has rebooted).
+    target_mux = 0 if mode == "Ultimate" else 1
+    current_mux = read_sysfs_int(GPU_MUX_PATH)
+    if current_mux != target_mux:
+        run_cmd(["asusctl", "armoury", "set", "gpu_mux_mode", str(target_mux)], on_done)
+        return
+    if mode == "Ultimate":
+        if on_done:
+            on_done(True, "")
+        return
+    disable = "1" if (mode == "Eco" or (mode == "Optimized" and on_battery)) else "0"
+    if disable == "1" and external_display_on_dgpu():
+        # Confirmed real risk, not hypothetical: an external monitor wired
+        # directly to the dGPU (e.g. this laptop's HDMI port) has no iGPU
+        # fallback -- disabling the dGPU would blank it outright, regardless
+        # of gpu_mux_mode. Refuse rather than silently disconnecting
+        # whatever the user is actively looking at.
+        if on_done:
+            on_done(False, "An external display is connected directly to the dGPU -- disabling it would disconnect that screen")
+        return
+    run_cmd(["asusctl", "armoury", "set", "dgpu_disable", disable], on_done)
 
 
 def gpu_in_heavy_use():
@@ -608,6 +627,37 @@ def gpu_in_heavy_use():
         return int(out) > 20
     except (OSError, subprocess.TimeoutExpired, ValueError):
         return False
+
+
+def external_display_on_dgpu():
+    """True if a non-internal-panel display is currently connected directly
+    to the NVIDIA dGPU, bypassing the MUX entirely. Confirmed on this exact
+    hardware: an external monitor plugged into the HDMI port shows up as
+    connector `HDMI-A-1` under the dGPU's own DRM card (vendor 0x10de), a
+    completely separate path from the MUX-switched internal panel -- so
+    disabling the dGPU would blank that external display outright,
+    regardless of gpu_mux_mode/dgpu_disable's usual "no reboot needed"
+    safety, with no iGPU fallback for that specific port. This is the gap
+    that let a user's external-monitor setup get silently disconnected by
+    Optimized-mode-on-battery automation before this check existed."""
+    base = "/sys/class/drm"
+    try:
+        entries = os.listdir(base)
+    except OSError:
+        return False
+    for entry in entries:
+        if not entry.startswith("card") or "-" not in entry:
+            continue
+        card_name = entry.split("-", 1)[0]
+        vendor = read_sysfs(os.path.join(base, card_name, "device", "vendor"))
+        if vendor != "0x10de":  # NVIDIA's PCI vendor ID -- fixed across all their GPUs
+            continue
+        connector = entry[len(card_name) + 1:]
+        if connector.startswith("eDP"):
+            continue  # internal panel routed through the dGPU is expected, not "external"
+        if read_sysfs(os.path.join(base, entry, "status")) == "connected":
+            return True
+    return False
 
 
 # NVIDIA GPU overclocking (Core/Memory Clock Offset, GPU Power/TGP) -- matches
@@ -2694,7 +2744,12 @@ class AutomationManager:
                 if notify:
                     notify_osd("Eco Mode", "GPU is in heavy use, leaving dGPU on")
             else:
-                apply_gpu_mode("Optimized", self.on_battery)
+                # apply_gpu_mode can refuse silently (e.g. an external display
+                # wired straight to the dGPU) -- without this callback, that
+                # refusal previously had no way to reach the user in this
+                # automation path (no toast_cb exists here, only OSD).
+                gpu_done = (lambda ok, err: notify_osd("Optimized GPU mode", err) if not ok and notify else None)
+                apply_gpu_mode("Optimized", self.on_battery, gpu_done)
 
         if auto["screen_auto"]:
             apply_screen_preset("auto-battery" if self.on_battery else "auto-ac")
