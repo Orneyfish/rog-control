@@ -509,10 +509,26 @@ def register_icons():
 
 
 def current_monitor():
+    """The laptop's own internal panel specifically -- refresh rate and
+    panel_overdrive are both laptop-panel-only features (an external
+    monitor has neither), but this used to just grab monitors[0], whichever
+    happened to enumerate first. Confirmed as a real bug with an external
+    display connected: `hyprctl monitors -j` listed the external HDMI
+    monitor before the internal eDP-1 panel, so every refresh-rate/
+    overdrive change (manual or from screen_auto automation, which fires on
+    every power-source transition) was silently targeting the *external*
+    monitor's `hyprctl keyword monitor` rule instead -- reported as
+    intermittent blackouts and a "monitor setup is incorrect" error with
+    two monitors attached. Falls back to monitors[0] only if no eDP output
+    is found at all (e.g. a docked/lid-closed setup with no internal panel
+    reported), so this stays safe on that edge case too."""
     try:
         out = subprocess.run(["hyprctl", "monitors", "-j"], capture_output=True, text=True, timeout=5).stdout
         monitors = json.loads(out)
-        return monitors[0] if monitors else None
+        if not monitors:
+            return None
+        internal = next((m for m in monitors if m.get("name", "").startswith("eDP")), None)
+        return internal if internal is not None else monitors[0]
     except (OSError, subprocess.TimeoutExpired, ValueError, IndexError):
         return None
 
@@ -784,7 +800,20 @@ def color_picker_button(initial_hex):
 def apply_screen_preset(preset, on_done=None):
     """preset: 'auto-battery' (60Hz, overdrive off), 'auto-ac' (max Hz, overdrive
     on), '60', or 'max' (max Hz + overdrive on, matching G-Helper's single combined
-    '<Hz> + OD' button)."""
+    '<Hz> + OD' button).
+
+    Applies the mode change via `hyprctl eval "hl.monitor({...})"`, not `hyprctl
+    keyword monitor ...` -- this Hyprland setup uses a Lua config (hyprland.lua),
+    and `keyword` is a runtime hook into the classic keyword-based config parser
+    only; confirmed directly that it no-ops with exit code 0 and stderr "keyword
+    can't work with non-legacy parsers. Use eval." on this machine, meaning every
+    refresh-rate/overdrive change (manual or from screen_auto automation) was
+    silently doing nothing -- run_cmd only checks the return code, so this
+    never even surfaced as an error toast. `hl.monitor(...)` is the Lua-config
+    equivalent (same function nwg-displays' generated monitors.lua calls) and
+    is confirmed working via direct testing. Position/scale are passed through
+    unchanged from the live readback -- this function only ever touches mode,
+    never rearranges the user's monitor layout."""
     hz = 60 if preset in ("60", "auto-battery") else max_refresh_rate()
     overdrive = "0" if preset in ("60", "auto-battery") else "1"
 
@@ -802,11 +831,15 @@ def apply_screen_preset(preset, on_done=None):
         return
     res = f"{monitor['width']}x{monitor['height']}"
     pos = f"{monitor['x']}x{monitor['y']}"
-    rule = f"{monitor['name']},{res}@{hz},{pos},{monitor['scale']}"
+    name = monitor["name"].replace('"', '')
+    lua = (
+        f'hl.monitor({{output = "{name}", mode = "{res}@{hz}", '
+        f'position = "{pos}", scale = {monitor["scale"]}}})'
+    )
     if read_sysfs_int(PANEL_OVERDRIVE_PATH) is None:
-        run_cmd(["hyprctl", "keyword", "monitor", rule], on_done)
+        run_cmd(["hyprctl", "eval", lua], on_done)
     else:
-        run_cmd(["hyprctl", "keyword", "monitor", rule], after_refresh)
+        run_cmd(["hyprctl", "eval", lua], after_refresh)
 
 
 def apply_kbd_level(level, on_done=None):
@@ -2839,11 +2872,19 @@ class RogControlApp(Adw.Application):
 
 def main():
     args = sys.argv[1:]
+    # Must precede the first dbus.SessionBus(): that connection is shared, and
+    # register_dbus_services() later reuses it, so it needs the main loop from birth.
+    DBusGMainLoop(set_as_default=True)
+    if not args and dbus.SessionBus().name_has_owner(APP_ID):
+        # The launcher entry runs a bare main.py, the same command as systemd's
+        # ExecStart. With an instance already up, a second GApplication registers
+        # as a "remote" instance and hangs forever with no window (found as eight
+        # stray processes, one per launcher click) -- so treat it as --open.
+        args = ["--open"]
     if args:
         # A hotkey/CLI invocation while the real instance (started once, by
         # systemd) is already running -- call straight into it over D-Bus and
         # exit, rather than spinning up a second GTK process.
-        DBusGMainLoop(set_as_default=True)
         try:
             obj = dbus.SessionBus().get_object(CONTROL_IFACE, CONTROL_PATH, introspect=False)
             if "--cycle-profile" in args:

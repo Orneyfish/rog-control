@@ -4,3 +4,6 @@ __pycache__/
 # MemPalace per-project files (issue #185)
 mempalace.yaml
 entities.json
+.super-agents/
+.job/
+.claude/worktrees/

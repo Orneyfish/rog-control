@@ -22,11 +22,18 @@ checked. Tests that read real hardware (sysfs, asusd D-Bus state) are safe,
 read-only, and used to catch drift (e.g. hwmon renumbering) rather than
 assert exact values that could change between runs.
 """
+import contextlib
 import json
 import os
+import statistics
+import subprocess
 import sys
+import tempfile
+import time
 import unittest
 import unittest.mock as mock
+
+import dbus.bus
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -128,6 +135,92 @@ class TestAuraModeMapping(unittest.TestCase):
     def test_every_effect_has_a_mode_index(self):
         for effect in main.AURA_EFFECTS:
             self.assertIn(effect, main.AURA_MODE_INDEX, f"{effect} missing from AURA_MODE_INDEX")
+
+
+class TestCurrentMonitorPicksInternalPanel(unittest.TestCase):
+    """Regression test: current_monitor() must always find the internal eDP
+    panel specifically, never just monitors[0]. Confirmed as a real bug with
+    an external display connected: `hyprctl monitors -j` listed the external
+    HDMI monitor *before* the internal eDP-1 panel, so every refresh-rate/
+    overdrive change (including screen_auto automation, which fires on every
+    power-source transition) was silently targeting the external monitor's
+    hyprctl rule instead of the laptop's own panel -- reported as
+    intermittent blackouts and a "monitor setup is incorrect" error with two
+    monitors attached."""
+
+    def test_picks_edp_even_when_listed_second(self):
+        fake_monitors = json.dumps([
+            {"name": "HDMI-A-1", "width": 2560, "height": 1440, "x": 1600, "y": 0, "scale": 1},
+            {"name": "eDP-1", "width": 2560, "height": 1440, "x": -1, "y": -1, "scale": 1},
+        ])
+        fake_result = mock.Mock(stdout=fake_monitors)
+        with mock.patch("subprocess.run", return_value=fake_result):
+            monitor = main.current_monitor()
+        self.assertEqual(monitor["name"], "eDP-1")
+
+    def test_picks_edp_even_when_listed_first(self):
+        fake_monitors = json.dumps([
+            {"name": "eDP-1", "width": 2560, "height": 1440, "x": 0, "y": 0, "scale": 1},
+            {"name": "HDMI-A-1", "width": 2560, "height": 1440, "x": 1600, "y": 0, "scale": 1},
+        ])
+        fake_result = mock.Mock(stdout=fake_monitors)
+        with mock.patch("subprocess.run", return_value=fake_result):
+            monitor = main.current_monitor()
+        self.assertEqual(monitor["name"], "eDP-1")
+
+    def test_falls_back_to_first_monitor_when_no_internal_panel(self):
+        """A docked/external-only setup (no eDP at all) shouldn't return
+        None -- fall back to whatever's there."""
+        fake_monitors = json.dumps([
+            {"name": "DP-1", "width": 3840, "height": 2160, "x": 0, "y": 0, "scale": 1},
+        ])
+        fake_result = mock.Mock(stdout=fake_monitors)
+        with mock.patch("subprocess.run", return_value=fake_result):
+            monitor = main.current_monitor()
+        self.assertEqual(monitor["name"], "DP-1")
+
+
+class TestApplyScreenPresetUsesEval(unittest.TestCase):
+    """Regression test: apply_screen_preset() must dispatch the mode change
+    via `hyprctl eval "hl.monitor({...})"`, never `hyprctl keyword monitor
+    ...`. Confirmed directly on this machine's Lua-config Hyprland setup that
+    `hyprctl keyword monitor ...` exits 0 while printing "keyword can't work
+    with non-legacy parsers. Use eval." to stderr -- since run_cmd only checks
+    the return code, this was a silent no-op with no error toast, meaning
+    screen_auto automation and every manual Screen button click never
+    actually changed anything. `hl.monitor(...)` (the same function
+    nwg-displays' generated monitors.lua calls) is the confirmed-working
+    equivalent."""
+
+    def _fake_monitor(self, x=-1, y=-1):
+        return json.dumps([
+            {"name": "eDP-1", "width": 2560, "height": 1440, "x": x, "y": y, "scale": 1},
+        ])
+
+    def test_uses_hyprctl_eval_not_keyword(self):
+        calls = []
+        fake_result = mock.Mock(stdout=self._fake_monitor())
+        with mock.patch("subprocess.run", return_value=fake_result), \
+             mock.patch.object(main, "read_sysfs_int", return_value=None), \
+             mock.patch.object(main, "run_cmd", side_effect=lambda cmd, on_done=None: calls.append(cmd)):
+            main.apply_screen_preset("60")
+        self.assertEqual(len(calls), 1)
+        cmd = calls[0]
+        self.assertEqual(cmd[0], "hyprctl")
+        self.assertEqual(cmd[1], "eval")
+        self.assertIn("hl.monitor(", cmd[2])
+        self.assertNotIn("keyword", cmd)
+
+    def test_preserves_position_and_output_name(self):
+        calls = []
+        fake_result = mock.Mock(stdout=self._fake_monitor(x=-1, y=-1))
+        with mock.patch("subprocess.run", return_value=fake_result), \
+             mock.patch.object(main, "read_sysfs_int", return_value=None), \
+             mock.patch.object(main, "run_cmd", side_effect=lambda cmd, on_done=None: calls.append(cmd)):
+            main.apply_screen_preset("max")
+        lua = calls[0][2]
+        self.assertIn('output = "eDP-1"', lua)
+        self.assertIn('position = "-1x-1"', lua)
 
 
 class TestGpuModeLogic(unittest.TestCase):
@@ -737,6 +830,137 @@ class TestHyprlandRulesSyntax(unittest.TestCase):
             text = f.read()
         self.assertIn('title = "^ROG Control$"', text)
         self.assertIn("Fans and Power", text)
+
+
+class TestAppStartup(unittest.TestCase):
+    """Black-box startup: run the real entry point (main.main(), what systemd's
+    ExecStart and the launcher entry both run) and time it until it is genuinely
+    up. "Up" = it answers a D-Bus Peer.Ping on its control service, which libdbus
+    only dispatches once the child's GLib main loop is running -- i.e. after
+    do_startup() (CSS, tray + control services, AutomationManager's synchronous
+    UPower/hyprctl/nvidia-smi probes) has fully returned. The control bus name
+    appearing earlier is reported too but isn't "up": it's claimed before
+    AutomationManager runs.
+
+    Runs on a private session bus so it can't collide with the live service, and
+    stubs run_cmd in the child (every hardware *write* goes through it) so a test
+    launch never changes real profile/GPU/screen/keyboard state."""
+
+    BUDGET_S = 5.0  # a warm start is far under this; only a real stall/hang trips it
+    RUNS = 3
+    ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    # toggle() is stubbed so an "open the panel" request can't pop a real window.
+    LAUNCHER = (
+        "import sys; sys.path.insert(0, {root!r}); import main; "
+        "main.run_cmd = lambda cmd, on_done=None: None; "
+        "main.RogPopup.toggle = lambda self: None; main.main()"
+    )
+    # No <servicedir>: the default session config lets GTK's portal lookups
+    # D-Bus-activate real xdg-desktop-portal services that outlive the test bus.
+    BUS_CONF = (
+        '<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN" '
+        '"http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">'
+        "<busconfig><type>session</type><listen>unix:tmpdir=/tmp</listen><auth>EXTERNAL</auth>"
+        '<policy context="default"><allow send_destination="*" eavesdrop="true"/>'
+        '<allow eavesdrop="true"/><allow own="*"/></policy></busconfig>'
+    )
+
+    @contextlib.contextmanager
+    def _private_bus(self):
+        """Yields (address, BusConnection) for a throwaway session bus."""
+        with tempfile.NamedTemporaryFile("w", suffix=".conf") as conf:
+            conf.write(self.BUS_CONF)
+            conf.flush()
+            daemon = subprocess.Popen(
+                ["dbus-daemon", f"--config-file={conf.name}", "--nofork", "--print-address=1"],
+                stdout=subprocess.PIPE, text=True,
+            )
+            try:
+                address = daemon.stdout.readline().strip()
+                yield address, dbus.bus.BusConnection(address)
+            finally:
+                daemon.terminate()
+                daemon.wait(timeout=10)
+                daemon.stdout.close()
+
+    def _launch(self, address, err):
+        return subprocess.Popen(
+            [sys.executable, "-c", self.LAUNCHER.format(root=self.ROOT)],
+            env=dict(os.environ, DBUS_SESSION_BUS_ADDRESS=address), stdout=subprocess.DEVNULL, stderr=err,
+        )
+
+    @staticmethod
+    def _stop(proc):
+        if proc is not None and proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+
+    def _fail_with_stderr(self, err, why):
+        err.seek(0)
+        self.fail(f"{why}\n--- app stderr ---\n{err.read().decode(errors='replace')[-600:]}")
+
+    def _wait_ready(self, conn, proc, err, t0):
+        """Returns (seconds until control bus name appears, seconds until it answers)."""
+        t_name = None
+        while time.perf_counter() - t0 < self.BUDGET_S:
+            if proc.poll() is not None:
+                self._fail_with_stderr(err, f"app exited during startup (code {proc.returncode})")
+            if conn.name_has_owner(main.CONTROL_IFACE):
+                t_name = time.perf_counter() - t0
+                break
+            time.sleep(0.01)
+        if t_name is None:
+            self._fail_with_stderr(err, f"control service never appeared on the bus within {self.BUDGET_S}s")
+        remaining = max(self.BUDGET_S - (time.perf_counter() - t0), 0.1)
+        try:
+            conn.call_blocking(main.CONTROL_IFACE, main.CONTROL_PATH,
+                               "org.freedesktop.DBus.Peer", "Ping", "", (), timeout=remaining)
+        except dbus.DBusException as e:
+            self._fail_with_stderr(err, f"app claimed its bus name but never started answering (main thread stuck in startup?): {e}")
+        return t_name, time.perf_counter() - t0
+
+    def _start_once(self):
+        with self._private_bus() as (address, conn), tempfile.TemporaryFile() as err:
+            t0 = time.perf_counter()
+            proc = self._launch(address, err)
+            try:
+                return self._wait_ready(conn, proc, err, t0)
+            finally:
+                self._stop(proc)
+
+    def test_starts_and_answers_within_budget(self):
+        runs = [self._start_once() for _ in range(self.RUNS)]
+        names, readys = [r[0] for r in runs], [r[1] for r in runs]
+        fmt = lambda xs: f"min {min(xs):.2f}s / median {statistics.median(xs):.2f}s / max {max(xs):.2f}s"
+        print(f"\n[startup] bus name up : {fmt(names)}\n[startup] fully ready : {fmt(readys)}  (budget {self.BUDGET_S}s, {self.RUNS} runs)")
+        for ready in readys:
+            self.assertLess(ready, self.BUDGET_S)
+
+    def test_launching_again_while_running_does_not_hang(self):
+        """The launcher entry runs a bare `main.py`, so clicking it while the tray
+        service is already up is a second plain launch. It must hand off to the
+        running instance and exit -- not linger as an invisible GApplication
+        "remote" instance (found in the wild: eight of them, some alive for hours,
+        one per click)."""
+        with self._private_bus() as (address, conn), tempfile.TemporaryFile() as err:
+            first = self._launch(address, err)
+            second = None
+            try:
+                self._wait_ready(conn, first, err, time.perf_counter())
+                second = self._launch(address, err)
+                try:
+                    second.wait(timeout=self.BUDGET_S)
+                except subprocess.TimeoutExpired:
+                    self.fail(f"second plain launch still running after {self.BUDGET_S}s: it hangs instead of handing off to the running instance")
+                self.assertEqual(second.returncode, 0)
+                self.assertIsNone(first.poll(), "the running instance must survive a second launch")
+            finally:
+                self._stop(second)
+                self._stop(first)
 
 
 if __name__ == "__main__":
