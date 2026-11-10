@@ -20,8 +20,8 @@ Strix G733ZW, Intel + NVIDIA mobile GPU) running Hyprland with the
 caelestia-shell rice, and several design decisions are deliberately coupled
 to that environment (see Architecture below). Porting to different hardware
 means re-verifying which `asus-armoury` firmware attributes are actually
-available (`asusctl armoury list`), the asusd Aura object path
-(`AURA_OBJECT_PATH`) and re-resolving the hwmon sensor names.
+available (`asusctl armoury list`) and re-resolving the hwmon sensor names (the asusd
+Aura object is discovered at runtime, nothing to port there).
 
 ## Commands
 
@@ -35,8 +35,12 @@ cargo build --release --locked      # -> target/release/rog-control
 ./install.sh --uninstall            # stop/disable the service, remove what it installed
 ```
 `PREFIX`, `XDG_DATA_HOME` and `XDG_CONFIG_HOME` relocate everything (used to test
-the installer without touching the real home). An existing unit / desktop entry it
-replaces is first kept once as `<name>.pre-rust`.
+the installer without touching the real home); they and `HOME` must be absolute
+(the script `cd`s into the checkout before writing, and systemd refuses a relative
+`ExecStart=`), and `PREFIX` must not hold whitespace, a quote, a backslash,
+`%`, `$` or a backtick (they are written unquoted into the unit). The script
+refuses a bad value up front, before building anything. An existing unit / desktop
+entry it replaces is first kept once as `<name>.pre-rust`.
 
 Run the app directly (foreground, for debugging — stderr shows panics and errors
 instead of the systemd journal):
@@ -98,7 +102,8 @@ window's close button hides it (and stops its polling) instead of quitting.
 
 **Everything that shells out or makes a D-Bus call must be async.** Widget
 `refresh()`/constructors may only do fast synchronous work (sysfs reads via
-`read_sysfs`/`read_sysfs_int`, a capped D-Bus property read). Anything that
+`read_sysfs`/`read_sysfs_int`, a D-Bus read capped at 1 s such as the Aura property and
+its one-time lookup). Anything that
 spawns a subprocess (`asusctl`, `nvidia-smi`, `nvidia-settings`,
 `powerprofilesctl`, `hyprctl`, `systemctl`) goes through `run_cmd()` (fire on a
 worker thread, deliver `(ok, err)` back on the GTK thread) or `spawn_bg()`
@@ -150,8 +155,11 @@ GPU-Optimized and Screen-Auto opt-in flags — and the last-set power limits
 (derived from `$HOME`, so `HOME=<tmp>` isolates a run), is held as a plain JSON
 value so unknown keys survive a save, is saved atomically (`config.json.tmp`, then
 rename), and a missing or corrupt file gives defaults without being rewritten at
-startup; the first save over an unparsable file keeps the original as
-`config.json.corrupt` (never overwriting an earlier one).
+startup. The first save over a file it cannot use as-is (unreadable, not JSON, not an
+object, or a section `merge_defaults` would replace) first keeps that file, without
+needing to read it, as `config.json.corrupt` (a later one as `.corrupt.1`, `.2`, ...:
+an earlier copy is never overwritten); if no copy can be made the save fails with an
+error naming the file and the file is left alone. An empty or healthy file gets no copy.
 Everything else (current profile, battery limit, fan curves, RGB state) is read
 live from asusctl/sysfs/asusd's D-Bus properties, never cached in config. This
 mirrors G-Helper's own automation model, which also has no single global
@@ -182,10 +190,14 @@ from asusd's own D-Bus property (`xyz.ljones.Aura`'s `LedModeData`, system bus,
 service `xyz.ljones.Asusd`) instead of assuming whatever this app last set. The
 integer `LedMode` enum has no documented mapping (`AURA_MODE_INDEX`) and was
 derived empirically — it is not sequential with `AURA_EFFECTS`' order, don't
-assume it is if extending it. `AURA_OBJECT_PATH` is hardware/boot specific (USB
-bus numbering) and is kept as the reference implementation had it; when it does
-not match, the read-back fails soft and the panels fall back to `static` / the
-theme colour.
+assume it is if extending it. The Aura object's path (`/xyz/ljones/aura/<id>`, the id
+carries the USB bus number and changes between boots) is never written down: the
+first read introspects `/xyz/ljones/aura`, takes the first child that answers
+`LedModeData`, remembers it, and looks again if the remembered one stops answering
+(but not when a call merely times out). Every call is capped at 1 s and the read fails
+soft (no asusd, no Aura object, no answer: `None`, so the panels fall back to `static` /
+the theme colour). `hook_aura_bus` stands in for asusd in tests (`FakeAsusd` in
+`tests/e2e/extra.rs`); `hook_aura_state` replaces the whole read.
 
 **D-Bus surface (all GIO's GDBus, no async runtime).** Session bus:
 `com.orneyfish.RogControl.Hotkeys` at `/com/orneyfish/RogControl/Hotkeys` with
@@ -233,7 +245,22 @@ thread, so the suite has its own tiny libtest-style runner (`harness = false`).
 and async probes fire during a test). A test whose fixture is absent on the machine
 (`rules.lua`, the caelestia scheme, an hwmon sensor, `dbus-daemon`) must
 `return skip("why")`, never a bare `return`: the runner prints it as SKIPPED and
-counts it under `ignored`, so a missing fixture can't pass silently.
+counts it under `ignored`, so a missing fixture can't pass silently. **The skip
+condition must come from the machine, never from the code under test**: probe the
+fixture with `std::fs` / `std::process` directly (the hwmon tests list
+`/sys/class/hwmon/*/name` themselves), skip only when it is truly absent (`NotFound`),
+and fail when the fixture exists but the code under test did not find or handle it.
+A loop over a code-defined collection needs a non-empty assert in front of it, or an
+empty collection passes it vacuously.
+
+**Every hardware write that can fail has a failure-toast test.** `tests/e2e/toasts.rs`
+makes the tool fail for each such control (`check()` drives it with the write failing
+and with it succeeding) and asserts the toast is exactly `<prefix>: <the tool's text>`
+and that success is silent; `RogPopup` wiring to its overlay and to each companion is
+tested there too. A new control that writes to hardware gets a case in that file, and
+`toasts__every_failure_site_in_src_has_a_case` fails until `FAILURE_SITES` matches the
+number of `failure_text(` call sites in `src/`. Mutation-check a new case: delete the
+toast (or pass `None` instead of its callback) and the test must fail.
 
 The suite is the Rust port of the original scenario list (each test carries a
 `// ports: <Class>.<test_name>` comment naming the original) plus `guards:` tests for

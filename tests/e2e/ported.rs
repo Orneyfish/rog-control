@@ -136,20 +136,44 @@ fn sysfs_helpers__read_sysfs_int_non_numeric_returns_default() {
     assert_eq!(read_sysfs_int(Some("/whatever")).unwrap_or(-1), -1);
 }
 
+/// The hwmon drivers this machine really has, read straight from sysfs. A test may skip for a
+/// missing device only on this evidence, never on what the resolver under test returned: a broken
+/// resolver finding nothing must fail the test, not skip it.
+fn hwmon_drivers_on_this_machine() -> Vec<String> {
+    let dirs = std::fs::read_dir("/sys/class/hwmon").into_iter().flatten().flatten();
+    dirs.filter_map(|d| std::fs::read_to_string(d.path().join("name")).ok()).map(|n| n.trim().to_string()).collect()
+}
+
+/// The sensor paths the resolver gave for the drivers present on this machine, as
+/// `(driver, path)`; the resolver finding none of a present driver's sensors fails the test.
+/// `None` (skip) only when the machine has none of the drivers.
+fn resolved_sensors(wanted: Vec<(&'static str, Option<String>)>) -> Option<Vec<(&'static str, String)>> {
+    let present = hwmon_drivers_on_this_machine();
+    let on_machine: Vec<_> = wanted.into_iter().filter(|(driver, _)| present.iter().any(|p| p == driver)).collect();
+    if on_machine.is_empty() {
+        return None;
+    }
+    Some(
+        on_machine
+            .into_iter()
+            .map(|(driver, path)| (driver, path.unwrap_or_else(|| panic!("/sys/class/hwmon has a {driver} device but the resolver found no sensor for it"))))
+            .collect(),
+    )
+}
+
 // ports: TestHwmonResolution.test_cpu_temp_path_is_coretemp_not_hardcoded
 fn hwmon_resolution__cpu_temp_path_is_coretemp_not_hardcoded() {
-    let Some(path) = hwmon().cpu_temp.clone() else { return skip("no coretemp hwmon device on this machine") };
-    let dir = std::path::Path::new(&path).parent().expect("sensor dir").join("name");
-    assert_eq!(read_sysfs(dir.to_str()).as_deref(), Some("coretemp"));
+    let Some(sensors) = resolved_sensors(vec![("coretemp", hwmon().cpu_temp.clone())]) else { return skip("no coretemp device in /sys/class/hwmon") };
+    for (_, path) in sensors {
+        let dir = std::path::Path::new(&path).parent().expect("sensor dir").join("name");
+        assert_eq!(read_sysfs(dir.to_str()).as_deref(), Some("coretemp"));
+    }
 }
 
 // ports: TestHwmonResolution.test_fan_paths_are_asus_driver
 fn hwmon_resolution__fan_paths_are_asus_driver() {
-    let paths: Vec<_> = [hwmon().cpu_fan.clone(), hwmon().gpu_fan.clone()].into_iter().flatten().collect();
-    if paths.is_empty() {
-        return skip("no asus hwmon fan device on this machine");
-    }
-    for path in paths {
+    let Some(sensors) = resolved_sensors(vec![("asus", hwmon().cpu_fan.clone()), ("asus", hwmon().gpu_fan.clone())]) else { return skip("no asus device in /sys/class/hwmon") };
+    for (_, path) in sensors {
         let dir = std::path::Path::new(&path).parent().expect("sensor dir").join("name");
         assert_eq!(read_sysfs(dir.to_str()).as_deref(), Some("asus"), "{path}");
     }
@@ -158,12 +182,11 @@ fn hwmon_resolution__fan_paths_are_asus_driver() {
 // ports: TestHwmonResolution.test_resolved_sensors_actually_readable
 fn hwmon_resolution__resolved_sensors_actually_readable() {
     let hw = hwmon();
-    let paths: Vec<_> = [&hw.cpu_temp, &hw.cpu_fan, &hw.gpu_fan].into_iter().flatten().collect();
-    if paths.is_empty() {
-        return skip("no hwmon sensor resolved on this machine");
-    }
-    for path in paths {
-        assert!(read_sysfs_int(Some(path)).is_some(), "{path} did not yield an int");
+    let Some(sensors) = resolved_sensors(vec![("coretemp", hw.cpu_temp.clone()), ("asus", hw.cpu_fan.clone()), ("asus", hw.gpu_fan.clone())]) else {
+        return skip("no coretemp or asus device in /sys/class/hwmon");
+    };
+    for (_, path) in sensors {
+        assert!(read_sysfs_int(Some(&path)).is_some(), "{path} did not yield an int");
     }
 }
 
@@ -176,7 +199,14 @@ fn colour_helpers__hex_gdk_rgba_round_trip() {
 
 // ports: TestColourHelpers.test_theme_colours_match_live_scheme
 fn colour_helpers__theme_colours_match_live_scheme() {
-    let Ok(text) = std::fs::read_to_string(scheme_json_path()) else { return skip("caelestia scheme.json not present on this machine") };
+    // The path is spelled out here, not taken from the code under test: if scheme_json_path() were
+    // wrong the colours below would no longer match the real file, and that must fail, not skip.
+    let path = std::path::PathBuf::from(std::env::var_os("HOME").expect("HOME")).join(".local/state/caelestia/scheme.json");
+    let text = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return skip("caelestia scheme.json not present on this machine"),
+        Err(e) => panic!("{} exists but cannot be read: {e}", path.display()),
+    };
     let data: serde_json::Value = serde_json::from_str(&text).expect("scheme.json parses");
     let live = |name: &str| data["colours"][name].as_str().expect("colour present").trim_start_matches('#').to_string();
     assert_eq!(theme_primary_hex(), live("primary"));
@@ -185,6 +215,7 @@ fn colour_helpers__theme_colours_match_live_scheme() {
 
 // ports: TestAuraModeMapping.test_index_maps_are_exact_inverses
 fn aura_mode_mapping__index_maps_are_exact_inverses() {
+    assert!(!AURA_MODE_INDEX.is_empty(), "no effects to check");
     for (name, idx) in AURA_MODE_INDEX {
         assert_eq!(aura_index_mode(idx), Some(name));
     }
@@ -196,6 +227,7 @@ fn aura_mode_mapping__index_maps_are_exact_inverses() {
 
 // ports: TestAuraModeMapping.test_every_effect_has_a_mode_index
 fn aura_mode_mapping__every_effect_has_a_mode_index() {
+    assert!(!aura_effect_names().is_empty(), "no effects to check");
     for effect in aura_effect_names() {
         assert!(AURA_MODE_INDEX.iter().any(|(n, _)| *n == effect), "{effect} missing from AURA_MODE_INDEX");
     }
@@ -413,6 +445,7 @@ fn external_display__ignores_non_nvidia_cards() {
 
 // ports: TestProfilePowerPlan.test_every_profile_has_a_power_plan
 fn profile_power_plan__every_profile_has_a_power_plan() {
+    assert!(!PROFILES.is_empty(), "no profiles to check");
     for p in PROFILES {
         assert!(profile_power_plan(p).is_some(), "{p}");
     }
@@ -861,8 +894,14 @@ fn no_dynamic_docking__open_dock_left_function_removed() {
     assert!(files > 5, "scanned only {files} source files");
 }
 
+/// `rules.lua` from the real home (a fixture, not code under test); `None` only when it is absent.
 fn rules_text() -> Option<String> {
-    std::fs::read_to_string(rog_control::sys::home_join(".config/hypr/custom/rules.lua")).ok()
+    let path = std::path::PathBuf::from(std::env::var_os("HOME").expect("HOME")).join(".config/hypr/custom/rules.lua");
+    match std::fs::read_to_string(&path) {
+        Ok(text) => Some(text),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => panic!("{} exists but cannot be read: {e}", path.display()),
+    }
 }
 
 // ports: TestHyprlandRulesSyntax.test_rules_file_parses_with_balanced_delimiters

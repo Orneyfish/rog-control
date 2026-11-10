@@ -79,34 +79,70 @@ pub fn load() -> Value {
     load_from(&config_path())
 }
 
-/// A file that exists but is not a JSON object was read as defaults at startup (never rewritten
-/// there); the first save is about to replace it with those defaults plus one change, so keep the
-/// original beside it as `config.json.corrupt` first. An existing `.corrupt` is never overwritten.
-fn keep_unusable(path: &Path) {
-    let Ok(bytes) = std::fs::read(path) else { return };
-    // An empty file holds nothing to keep (and an empty `.corrupt` would block a real backup later).
-    if bytes.trim_ascii().is_empty() || matches!(serde_json::from_slice::<Value>(&bytes), Ok(Value::Object(_))) {
-        return;
-    }
-    let mut backup = path.as_os_str().to_owned();
-    backup.push(".corrupt");
-    let result = std::fs::OpenOptions::new().write(true).create_new(true).open(&backup).and_then(|mut f| {
-        f.write_all(&bytes)?;
-        f.sync_all()
-    });
-    match result {
-        Ok(()) => eprintln!("rog-control: {} is not valid; kept a copy as {}", path.display(), PathBuf::from(&backup).display()),
-        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
-        Err(e) => eprintln!("rog-control: could not keep a copy of the unreadable {}: {e}", path.display()),
+/// True when `merge_defaults` would throw something the file holds away: the file is not a JSON
+/// object, or a section that must be an object holds something else (`null` holds nothing).
+fn would_discard(value: &Value, defaults: &Value) -> bool {
+    match (value, defaults) {
+        (Value::Null, _) => false,
+        (Value::Object(map), Value::Object(defs)) => defs.iter().any(|(key, default)| map.get(key).is_some_and(|v| would_discard(v, default))),
+        (_, Value::Object(_)) => true,
+        _ => false,
     }
 }
 
-/// Atomic: write `config.json.tmp`, then rename over the real file.
+/// `<path>.corrupt`, or the first of `<path>.corrupt.1`, `.2`, ... that does not exist yet.
+fn free_backup_name(path: &Path) -> Option<PathBuf> {
+    (0..1000).find_map(|n| {
+        let mut name = path.as_os_str().to_owned();
+        name.push(".corrupt");
+        if n > 0 {
+            name.push(format!(".{n}"));
+        }
+        let name = PathBuf::from(name);
+        std::fs::symlink_metadata(&name).is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound).then_some(name)
+    })
+}
+
+/// A file that cannot be read as the config (unreadable, not JSON, not an object, or an object
+/// whose sections `merge_defaults` would replace) was read as defaults at startup and never
+/// rewritten there. The save about to replace it would destroy it, so it is kept first, without
+/// being read, as `config.json.corrupt` (or the next free `.corrupt.N`; an earlier copy is never
+/// overwritten). An empty or healthy file needs no copy. `Err` means no copy could be made: the
+/// caller must not replace the file.
+fn keep_unusable(path: &Path) -> std::io::Result<()> {
+    let unusable = match std::fs::read(path) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
+        Err(_) => true,
+        // An empty file holds nothing to keep (and an empty copy is noise).
+        Ok(bytes) if bytes.trim_ascii().is_empty() => false,
+        Ok(bytes) => serde_json::from_slice::<Value>(&bytes).map_or(true, |v| would_discard(&v, &defaults())),
+    };
+    if !unusable {
+        return Ok(());
+    }
+    let kept = free_backup_name(path)
+        .ok_or_else(|| std::io::Error::other("too many .corrupt copies already"))
+        .and_then(|backup| match std::fs::hard_link(path, &backup) {
+            // Links refused (another owner, a directory, an odd filesystem): move it aside instead.
+            Err(e) if e.kind() != std::io::ErrorKind::AlreadyExists => std::fs::rename(path, &backup).map(|()| backup),
+            other => other.map(|()| backup),
+        });
+    match kept {
+        Ok(backup) => {
+            eprintln!("rog-control: {} cannot be used as the config; kept it as {}", path.display(), backup.display());
+            Ok(())
+        }
+        // The caller logs this (`could not save config: ...`), so the give-up is never silent.
+        Err(e) => Err(std::io::Error::new(e.kind(), format!("{} cannot be used as the config and no copy could be made ({e}); it was left untouched", path.display()))),
+    }
+}
+
+/// Atomic: write `config.json.tmp`, then rename over the real file. Whatever unusable file is
+/// there is kept first (see [`keep_unusable`]); if that fails the file is left exactly as it was.
 pub fn save_to(path: &Path, cfg: &Value) -> std::io::Result<()> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    keep_unusable(path);
     let mut tmp = path.as_os_str().to_owned();
     tmp.push(".tmp");
     let tmp = PathBuf::from(tmp);
@@ -115,6 +151,10 @@ pub fn save_to(path: &Path, cfg: &Value) -> std::io::Result<()> {
     f.write_all(text.as_bytes())?;
     f.sync_all()?;
     drop(f);
+    if let Err(e) = keep_unusable(path) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
+    }
     std::fs::rename(&tmp, path)
 }
 

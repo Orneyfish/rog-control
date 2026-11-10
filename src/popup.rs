@@ -160,10 +160,10 @@ impl RogPopup {
     }
 
     /// Companion windows are destroyed on close and rebuilt fresh on the next open; only one of
-    /// each exists at a time.
-    pub fn open_fans(self: &Rc<Self>) {
+    /// each exists at a time. `ensure_*` finds or builds the window without showing it.
+    pub fn ensure_fans(self: &Rc<Self>) -> Rc<FansPowerWindow> {
         let existing = self.fans_window.borrow().clone();
-        let win = match existing {
+        match existing {
             Some(w) => {
                 w.refresh();
                 w
@@ -180,13 +180,16 @@ impl RogPopup {
                 *self.fans_window.borrow_mut() = Some(w.clone());
                 w
             }
-        };
-        win.window.present();
+        }
     }
 
-    pub fn open_lighting(self: &Rc<Self>) {
+    pub fn open_fans(self: &Rc<Self>) {
+        self.ensure_fans().window.present();
+    }
+
+    pub fn ensure_lighting(self: &Rc<Self>) -> Rc<LightingWindow> {
         let existing = self.lighting_window.borrow().clone();
-        let win = match existing {
+        match existing {
             Some(w) => {
                 w.refresh();
                 w
@@ -209,13 +212,16 @@ impl RogPopup {
                 *self.lighting_window.borrow_mut() = Some(w.clone());
                 w
             }
-        };
-        win.window.present();
+        }
     }
 
-    pub fn open_extra(self: &Rc<Self>) {
+    pub fn open_lighting(self: &Rc<Self>) {
+        self.ensure_lighting().window.present();
+    }
+
+    pub fn ensure_extra(self: &Rc<Self>) -> Rc<ExtraWindow> {
         let existing = self.extra_window.borrow().clone();
-        let win = match existing {
+        match existing {
             Some(w) => {
                 w.refresh();
                 w
@@ -232,8 +238,11 @@ impl RogPopup {
                 *self.extra_window.borrow_mut() = Some(w.clone());
                 w
             }
-        };
-        win.window.present();
+        }
+    }
+
+    pub fn open_extra(self: &Rc<Self>) {
+        self.ensure_extra().window.present();
     }
 
     pub fn is_visible(&self) -> bool {

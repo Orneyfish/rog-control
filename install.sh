@@ -10,7 +10,19 @@
 # Nothing here edits Hyprland config; the keybinds are a one-time manual step (see CLAUDE.md).
 # PREFIX must not contain whitespace or any of  " ' \ % $ `  (it is written unquoted into the unit and
 # desktop entry, where they split or rewrite the command); the script refuses such a path up front.
+# PREFIX, XDG_DATA_HOME, XDG_CONFIG_HOME and HOME must be absolute when set: the script changes into the
+# checkout before it writes anything, and systemd refuses a relative ExecStart=.
 set -eu
+
+for var in HOME PREFIX XDG_DATA_HOME XDG_CONFIG_HOME; do
+  case ${!var:-} in
+    ''|/*) ;;
+    *)
+      echo "install.sh: $var must be an absolute path, got '${!var}'. Nothing was installed." >&2
+      exit 2
+      ;;
+  esac
+done
 
 PREFIX=${PREFIX:-$HOME/.local}
 DATA_HOME=${XDG_DATA_HOME:-$HOME/.local/share}

@@ -194,10 +194,6 @@ pub fn aura_index_mode(idx: u32) -> Option<&'static str> {
     AURA_MODE_INDEX.iter().find(|(_, i)| *i == idx).map(|(n, _)| *n)
 }
 
-/// Hardware-specific object suffix (USB vendor/product/bus/port); kept verbatim from the
-/// reference implementation.
-pub const AURA_OBJECT_PATH: &str = "/xyz/ljones/aura/19b6_3_3";
-
 /// G-Helper's fixed per-concept accent colours (teal = battery friendly, blue = standard, red =
 /// max performance, orange = custom action), a deliberate exception to the Material palette.
 pub const ACCENT_ECO: &str = "#06B48A";
@@ -535,30 +531,105 @@ pub fn hook_aura_state(hook: impl Fn() -> Option<AuraState> + 'static) -> AuraGu
     AuraGuard(AURA_HOOK.with(|h| h.borrow_mut().replace(std::rc::Rc::new(hook))))
 }
 
+/// Where asusd exports its Aura objects. The object's own name (`19b6_2_3`: USB vendor/product,
+/// bus, port) changes between boots and firmware, so it is looked up here, never written down.
+const AURA_ROOT: &str = "/xyz/ljones/aura";
+
+/// `(object path, interface, method, arguments)` -> reply, for one call to asusd on the system bus.
+type AuraBusCall = std::rc::Rc<dyn Fn(&str, &str, &str, Option<&glib::Variant>) -> Result<glib::Variant, glib::Error>>;
+
+thread_local! {
+    static AURA_BUS_HOOK: std::cell::RefCell<Option<AuraBusCall>> = const { std::cell::RefCell::new(None) };
+    /// The Aura object that last answered, so a refresh costs one property read, not a lookup.
+    static AURA_PATH: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Restores the previous bus hook (and forgets the cached Aura path) when dropped.
+pub struct AuraBusGuard(Option<AuraBusCall>);
+
+impl Drop for AuraBusGuard {
+    fn drop(&mut self) {
+        AURA_BUS_HOOK.with(|h| *h.borrow_mut() = self.0.take());
+        AURA_PATH.with(|p| *p.borrow_mut() = None);
+    }
+}
+
+/// Test seam (main thread only): while the guard lives, every call [`read_aura_state`] makes to
+/// asusd goes to `hook` instead of the system bus, so a test can stand in for the daemon: which
+/// objects it exports, which ones answer, which fail or time out.
+pub fn hook_aura_bus(hook: impl Fn(&str, &str, &str, Option<&glib::Variant>) -> Result<glib::Variant, glib::Error> + 'static) -> AuraBusGuard {
+    AURA_PATH.with(|p| *p.borrow_mut() = None);
+    AuraBusGuard(AURA_BUS_HOOK.with(|h| h.borrow_mut().replace(std::rc::Rc::new(hook))))
+}
+
+/// One call to asusd, capped at 1 s as the architecture allows for synchronous D-Bus reads.
+fn aura_bus_call(path: &str, interface: &str, method: &str, args: Option<&glib::Variant>) -> Result<glib::Variant, glib::Error> {
+    if let Some(hook) = AURA_BUS_HOOK.with(|h| h.borrow().clone()) {
+        return hook(path, interface, method, args);
+    }
+    let bus = gio::bus_get_sync(gio::BusType::System, gio::Cancellable::NONE)?;
+    bus.call_sync(Some("xyz.ljones.Asusd"), path, interface, method, args, None, gio::DBusCallFlags::NONE, 1000, gio::Cancellable::NONE)
+}
+
+/// `LedModeData` of the Aura object at `path`.
+fn aura_led_mode_data(path: &str) -> Result<AuraState, glib::Error> {
+    let args = ("xyz.ljones.Aura", "LedModeData").to_variant();
+    let reply = aura_bus_call(path, "org.freedesktop.DBus.Properties", "Get", Some(&args))?;
+    reply
+        .child_value(0)
+        .as_variant()
+        .and_then(|inner| parse_led_mode_data(&inner))
+        .ok_or_else(|| glib::Error::new(gio::DBusError::InvalidArgs, "unexpected LedModeData"))
+}
+
+/// A timed-out call means asusd is busy or stuck, not that the object moved: asking again (or
+/// asking for the list of objects) would only block for another second.
+fn aura_timed_out(e: &glib::Error) -> bool {
+    e.matches(gio::IOErrorEnum::TimedOut)
+}
+
+/// Looks for the Aura object by introspecting [`AURA_ROOT`]: the first child (in name order) that
+/// answers `LedModeData` is the keyboard, and is remembered.
+fn discover_aura_state() -> Option<AuraState> {
+    let reply = aura_bus_call(AURA_ROOT, "org.freedesktop.DBus.Introspectable", "Introspect", None).ok()?;
+    let xml = reply.child_value(0).get::<String>()?;
+    let mut names: Vec<String> = gio::DBusNodeInfo::for_xml(&xml).ok()?.nodes().iter().filter_map(|n| n.path()).map(String::from).collect();
+    names.sort();
+    for name in names {
+        // asusd is trusted, but an object path with other characters would make GDBus complain.
+        if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+            continue;
+        }
+        let path = format!("{AURA_ROOT}/{name}");
+        match aura_led_mode_data(&path) {
+            Ok(state) => {
+                AURA_PATH.with(|p| *p.borrow_mut() = Some(path));
+                return Some(state);
+            }
+            Err(e) if aura_timed_out(&e) => return None,
+            Err(_) => {}
+        }
+    }
+    None
+}
+
 /// Current keyboard RGB mode/colours/speed/direction, read straight from asusd's own D-Bus
 /// property rather than assumed from whatever this app last set, so the panel reflects reality
-/// even after a physical Fn-combo or an asusctl call made elsewhere. A quick property read with a
-/// 1 s cap, as the architecture allows for D-Bus `Get()` calls.
+/// even after a physical Fn-combo or an asusctl call made elsewhere. The Aura object is
+/// discovered, then remembered; if the remembered one stops answering it is looked up again.
+/// Every call is capped at 1 s and fails soft: no asusd, no Aura object or no answer gives `None`.
 pub fn read_aura_state() -> Option<AuraState> {
     if let Some(hook) = AURA_HOOK.with(|h| h.borrow().clone()) {
         return hook();
     }
-    let bus = gio::bus_get_sync(gio::BusType::System, gio::Cancellable::NONE).ok()?;
-    let reply = bus
-        .call_sync(
-            Some("xyz.ljones.Asusd"),
-            AURA_OBJECT_PATH,
-            "org.freedesktop.DBus.Properties",
-            "Get",
-            Some(&("xyz.ljones.Aura", "LedModeData").to_variant()),
-            None,
-            gio::DBusCallFlags::NONE,
-            1000,
-            gio::Cancellable::NONE,
-        )
-        .ok()?;
-    let inner = reply.child_value(0).as_variant()?;
-    parse_led_mode_data(&inner)
+    if let Some(path) = AURA_PATH.with(|p| p.borrow().clone()) {
+        match aura_led_mode_data(&path) {
+            Ok(state) => return Some(state),
+            Err(e) if aura_timed_out(&e) => return None,
+            Err(_) => AURA_PATH.with(|p| *p.borrow_mut() = None),
+        }
+    }
+    discover_aura_state()
 }
 
 /// The `asusctl aura effect ...` command for the given field values; only the fields the effect

@@ -46,6 +46,10 @@ pub fn tests() -> Vec<(&'static str, fn())> {
         config__save_is_atomic_and_keeps_unknown_keys,
         config__corrupt_missing_and_misshapen_files_give_defaults,
         config__first_save_keeps_a_copy_of_an_unusable_file,
+        config__every_later_unusable_file_gets_its_own_copy,
+        config__unreadable_file_is_kept_without_reading_it,
+        config__misshapen_sections_are_kept_before_they_are_replaced,
+        config__save_refuses_to_overwrite_when_no_copy_can_be_made,
         install__refuses_a_prefix_that_would_corrupt_the_unit,
         startup_panel__switch_runs_enable_and_disable,
         keyboard_panel__level_buttons_send_leds_set_and_are_remembered_per_power_source,
@@ -64,6 +68,10 @@ pub fn tests() -> Vec<(&'static str, fn())> {
         automation__gpu_optimized_guards,
         tray__properties_match_the_wire_contract,
         aura__led_mode_data_and_effect_commands,
+        aura__discovery_finds_the_exported_object_and_remembers_it,
+        aura__read_fails_soft_when_nothing_answers,
+        aura__stale_remembered_object_is_rediscovered,
+        keyboard_panel__shows_and_preserves_what_asusd_reports,
         helpers__python_compatible_rounding_and_formatting,
         battery_text__charging_and_health,
         theme__filters_only_known_environment_noise,
@@ -71,7 +79,7 @@ pub fn tests() -> Vec<(&'static str, fn())> {
 }
 
 /// A capture hook that records every non-read command and answers it with `reply`.
-fn recording_capture(
+pub fn recording_capture(
     reply: impl Fn(&[String]) -> CmdOut + Send + Sync + 'static,
 ) -> (Arc<Mutex<Vec<String>>>, rog_control::sys::CaptureGuard) {
     let seen = Arc::new(Mutex::new(Vec::new()));
@@ -87,11 +95,11 @@ fn recording_capture(
     (seen, guard)
 }
 
-fn seen(log: &Arc<Mutex<Vec<String>>>) -> Vec<String> {
+pub fn seen(log: &Arc<Mutex<Vec<String>>>) -> Vec<String> {
     log.lock().expect("lock").clone()
 }
 
-fn sysfs_map(pairs: &'static [(&'static str, &'static str)]) -> SysfsGuard {
+pub fn sysfs_map(pairs: &'static [(&'static str, &'static str)]) -> SysfsGuard {
     hook_sysfs(
         move |p| pairs.iter().find(|(k, _)| *k == p).map(|(_, v)| (*v).to_string()),
         |_| Some(vec![]),
@@ -314,7 +322,7 @@ fn control__dispatch_maps_each_method_and_rejects_bad_input() {
     assert_eq!(log.borrow().len(), 4, "a rejected call still did something: {:?}", log.borrow());
 }
 
-fn strings(args: &[&str]) -> Vec<String> {
+pub fn strings(args: &[&str]) -> Vec<String> {
     args.iter().map(|s| s.to_string()).collect()
 }
 
@@ -467,13 +475,13 @@ fn battery_panel__refresh_mid_debounce_keeps_the_users_limit() {
     assert_eq!(panel.scale.value(), 80.0, "refresh stayed disabled after the debounce fired");
 }
 
-fn effect_index(name: &str) -> u32 {
+pub fn effect_index(name: &str) -> u32 {
     aura_effect_names().iter().position(|e| *e == name).expect("known effect") as u32
 }
 
 /// What asusd "reports" in these tests, so a refresh that reverts to it is detectable whatever
 /// keyboard the machine has: a static red effect at low speed.
-fn asusd_says_static_red() -> rog_control::hw::AuraGuard {
+pub fn asusd_says_static_red() -> rog_control::hw::AuraGuard {
     hook_aura_state(|| {
         Some(AuraState { effect: "static".into(), colour1: "ff0000".into(), colour2: "00ff00".into(), speed: "low".into(), direction: "left".into() })
     })
@@ -570,36 +578,121 @@ fn fans_window__refresh_mid_debounce_keeps_every_slider_value() {
     clear_tool_overrides();
 }
 
-// guards: FR-29 - the first save over an unusable file keeps the original as config.json.corrupt, once
-fn config__first_save_keeps_a_copy_of_an_unusable_file() {
-    let tmp = TempDir::new("cfgkeep");
-    let path = tmp.0.join("config.json");
-    let backup = tmp.0.join("config.json.corrupt");
-    let read = |p: &std::path::Path| std::fs::read(p).expect("read");
-
-    std::fs::write(&path, "{not json").expect("seed");
-    let mut cfg = config::load_from(&path);
-    assert!(!backup.exists(), "loading must not create anything");
-    assert_eq!(read(&path), b"{not json", "loading must not rewrite the file");
-    cfg["automation"]["profile_ac"] = json!("Balanced");
-    config::save_to(&path, &cfg).expect("save");
-    assert_eq!(read(&backup), b"{not json", "the user's original file was not kept");
-    assert_eq!(config::load_from(&path)["automation"]["profile_ac"], json!("Balanced"));
-
-    // A later unusable file never replaces the first copy, and a healthy file never makes one.
-    std::fs::write(&path, "[1, 2]").expect("seed again");
-    config::save_to(&path, &cfg).expect("save");
-    assert_eq!(read(&backup), b"{not json", "an existing .corrupt was overwritten");
-    let healthy = TempDir::new("cfgkeep2");
-    let hpath = healthy.0.join("config.json");
-    std::fs::write(&hpath, r#"{"automation": {"gpu_optimized": true}}"#).expect("seed");
-    config::save_to(&hpath, &config::load_from(&hpath)).expect("save");
-    std::fs::write(&hpath, "   \n").expect("empty file");
-    config::save_to(&hpath, &cfg).expect("save");
-    assert!(!healthy.0.join("config.json.corrupt").exists(), "a copy was made of a file with nothing in it");
+/// A fresh config directory holding `config.json` with `body`; returns it, the path and a loaded copy.
+fn config_with(tag: &str, body: &[u8]) -> (TempDir, std::path::PathBuf, serde_json::Value) {
+    let dir = TempDir::new(tag);
+    let path = dir.0.join("config.json");
+    std::fs::write(&path, body).expect("seed");
+    let cfg = config::load_from(&path);
+    (dir, path, cfg)
 }
 
-// guards: FR-31 - a PREFIX/HOME that systemd would misread is refused before anything is built or written
+fn corrupt_copies(dir: &TempDir) -> Vec<String> {
+    let mut names: Vec<String> =
+        std::fs::read_dir(&dir.0).expect("read dir").flatten().map(|e| e.file_name().to_string_lossy().into_owned()).filter(|n| n.contains(".corrupt")).collect();
+    names.sort();
+    names
+}
+
+// guards: FR-29 - the first save over an unusable file keeps the original as config.json.corrupt; healthy and empty files get no copy
+fn config__first_save_keeps_a_copy_of_an_unusable_file() {
+    let (dir, path, mut cfg) = config_with("cfgkeep", b"{not json");
+    assert!(corrupt_copies(&dir).is_empty(), "loading must not create anything");
+    assert_eq!(std::fs::read(&path).expect("read"), b"{not json", "loading must not rewrite the file");
+    cfg["automation"]["profile_ac"] = json!("Balanced");
+    config::save_to(&path, &cfg).expect("save");
+    assert_eq!(std::fs::read(dir.0.join("config.json.corrupt")).expect("copy"), b"{not json", "the user's original file was not kept");
+    assert_eq!(config::load_from(&path)["automation"]["profile_ac"], json!("Balanced"));
+    assert!(!dir.0.join("config.json.tmp").exists(), "temp file left behind");
+
+    // Nothing is lost by replacing these two, so nothing is copied.
+    let (healthy, hpath, hcfg) = config_with("cfgkeep2", br#"{"automation": {"gpu_optimized": true}, "future": [1]}"#);
+    config::save_to(&hpath, &hcfg).expect("save");
+    std::fs::write(&hpath, "   \n").expect("empty file");
+    config::save_to(&hpath, &cfg).expect("save");
+    assert!(corrupt_copies(&healthy).is_empty(), "a copy was made of a file that lost nothing: {:?}", corrupt_copies(&healthy));
+}
+
+// guards: FR-29 - a later unusable file is kept too, under the next free name, and no earlier copy is overwritten
+fn config__every_later_unusable_file_gets_its_own_copy() {
+    let (dir, path, cfg) = config_with("cfglater", b"{not json");
+    let bodies: [&[u8]; 4] = [b"{not json", b"[1, 2]", b"5", b"{\"automation\": {\"gpu_optimized\": tru"];
+    for (round, body) in bodies.iter().enumerate() {
+        std::fs::write(&path, body).expect("corrupt it again");
+        config::save_to(&path, &cfg).expect("save");
+        assert_eq!(config::load_from(&path), cfg, "round {round}: the new file does not hold what was saved");
+    }
+    assert_eq!(corrupt_copies(&dir), ["config.json.corrupt", "config.json.corrupt.1", "config.json.corrupt.2", "config.json.corrupt.3"]);
+    for (name, body) in corrupt_copies(&dir).iter().zip(bodies) {
+        assert_eq!(std::fs::read(dir.0.join(name)).expect("read copy"), body, "{name} does not hold the file it was made from");
+    }
+}
+
+// guards: FR-29 - a config.json that exists but cannot be read is kept, not overwritten with defaults
+fn config__unreadable_file_is_kept_without_reading_it() {
+    use std::os::unix::fs::PermissionsExt;
+    let original = br#"{"automation": {"profile_ac": "Quiet", "kbd_ac": "low"}}"#;
+    let (dir, path, mut cfg) = config_with("cfgperm", original);
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).expect("chmod");
+    if std::fs::read(&path).is_ok() {
+        return skip("this user can read a mode 000 file (root?), so the file cannot be made unreadable");
+    }
+    cfg["automation"]["profile_ac"] = json!("Balanced");
+    config::save_to(&path, &cfg).expect("save");
+    let copy = dir.0.join("config.json.corrupt");
+    std::fs::set_permissions(&copy, std::fs::Permissions::from_mode(0o600)).expect("chmod copy");
+    assert_eq!(std::fs::read(&copy).expect("copy"), original, "the unreadable original was overwritten without a copy");
+    assert_eq!(config::load_from(&path)["automation"]["profile_ac"], json!("Balanced"));
+
+    // Something no link can point at (here a directory) is moved aside instead of overwritten.
+    let odd = TempDir::new("cfgdir");
+    let opath = odd.0.join("config.json");
+    std::fs::create_dir(&opath).expect("config.json as a directory");
+    std::fs::write(opath.join("inside"), "mine").expect("seed");
+    config::save_to(&opath, &cfg).expect("save");
+    assert_eq!(std::fs::read(odd.0.join("config.json.corrupt").join("inside")).expect("moved"), b"mine");
+    assert_eq!(config::load_from(&opath)["automation"]["profile_ac"], json!("Balanced"));
+}
+
+// guards: FR-29 - a valid object whose section has the wrong shape is kept before merge_defaults replaces that section
+fn config__misshapen_sections_are_kept_before_they_are_replaced() {
+    for (what, body) in [
+        ("automation is a string", r#"{"automation": "hand edited", "power_limits": {"pl1": 90}}"#),
+        ("power_limits is a number", r#"{"automation": {"kbd_ac": "low"}, "power_limits": 3}"#),
+        ("a section is a list", r#"{"automation": [1, 2], "keep": true}"#),
+        ("a section is true", r#"{"power_limits": true}"#),
+    ] {
+        let (dir, path, cfg) = config_with("cfgshape", body.as_bytes());
+        config::save_to(&path, &cfg).expect("save");
+        assert_eq!(std::fs::read(dir.0.join("config.json.corrupt")).unwrap_or_default(), body.as_bytes(), "{what}: the original was not kept");
+    }
+    // Nothing is thrown away here: null holds nothing, and a wrong-typed leaf survives the merge.
+    for (what, body) in [
+        ("null sections", r#"{"automation": null, "power_limits": null}"#),
+        ("a wrong-typed leaf", r#"{"automation": {"gpu_optimized": "yes"}}"#),
+        ("an empty object", "{}"),
+    ] {
+        let (dir, path, cfg) = config_with("cfgshape2", body.as_bytes());
+        config::save_to(&path, &cfg).expect("save");
+        assert!(corrupt_copies(&dir).is_empty(), "{what}: a copy was made of a file that lost nothing");
+    }
+}
+
+// guards: FR-29 - when no copy can be made the file is left alone and the save says so
+fn config__save_refuses_to_overwrite_when_no_copy_can_be_made() {
+    let (dir, path, cfg) = config_with("cfgfull", b"{not json");
+    std::fs::write(dir.0.join("config.json.corrupt"), "first").expect("seed");
+    for n in 1..1000 {
+        std::fs::write(dir.0.join(format!("config.json.corrupt.{n}")), "full").expect("seed");
+    }
+    let err = config::save_to(&path, &cfg).expect_err("the only copy of the user's file would have been destroyed");
+    let message = err.to_string();
+    assert!(message.contains("config.json") && message.contains("no copy could be made"), "the caller logs this, it must say what happened: {message}");
+    assert_eq!(std::fs::read(&path).expect("read"), b"{not json", "the file was replaced although it could not be kept");
+    assert!(!dir.0.join("config.json.tmp").exists(), "temp file left behind");
+}
+
+// guards: FR-31 - a PREFIX/HOME that systemd would misread, or any install path that is not absolute, is refused before anything is built or written
 fn install__refuses_a_prefix_that_would_corrupt_the_unit() {
     use std::os::unix::fs::PermissionsExt;
     use std::process::Command;
@@ -613,32 +706,48 @@ fn install__refuses_a_prefix_that_would_corrupt_the_unit() {
     std::fs::set_permissions(&cargo, std::fs::Permissions::from_mode(0o755)).expect("chmod");
     let path = format!("{}:{}", fakebin.display(), std::env::var("PATH").unwrap_or_default());
     let script = concat!(env!("CARGO_MANIFEST_DIR"), "/install.sh");
-    let run = |var: &str, value: &str| {
-        let home = root.0.join("home");
+    let abs = |name: &str| root.0.join(name).to_string_lossy().into_owned();
+    // `vars` are set exactly as given, and relative ones resolve against `root`, not the checkout.
+    let run = |vars: &[(&str, String)]| {
+        let _ = std::fs::remove_file(&ran);
         let mut cmd = Command::new("bash");
-        cmd.arg(script).arg("--no-enable").env_clear().env("PATH", &path).env("HOME", &home);
-        match var {
-            "HOME" => cmd.env("HOME", root.0.join(value)),
-            _ => cmd.env("PREFIX", root.0.join(value)),
-        };
+        cmd.arg(script).arg("--no-enable").current_dir(&root.0).env_clear().env("PATH", &path).env("HOME", abs("home"));
+        for (var, value) in vars {
+            cmd.env(var, value);
+        }
         let out = cmd.output().expect("run install.sh");
         (out.status.code(), String::from_utf8_lossy(&out.stderr).into_owned())
     };
     let nothing_written = || !root.0.join("home").exists() && !ran.exists();
 
     for (var, value) in [("PREFIX", "pre fix"), ("PREFIX", "50%off"), ("PREFIX", "q\"uote"), ("PREFIX", "back\\slash"), ("PREFIX", "dollar$x"), ("HOME", "my home")] {
-        let (code, err) = run(var, value);
+        let (code, err) = run(&[(var, abs(value))]);
         assert_eq!(code, Some(2), "{var}={value:?} was not refused: {err}");
         assert!(err.contains("cannot install") && err.contains("PREFIX"), "{var}={value:?}: the message does not name the problem: {err}");
         assert!(nothing_written(), "{var}={value:?}: files were written or the build started");
     }
-    // Control: a plain path passes the check and goes on to the build (our fake cargo fails it).
-    let (code, err) = run("PREFIX", "plain");
-    assert_eq!(code, Some(1), "a plain PREFIX was refused: {err}");
-    assert!(ran.exists(), "a plain PREFIX never reached the build: {err}");
+    // Every variable whose value becomes an install target or lands in the unit must be absolute:
+    // the script moves into the checkout first, so a relative one would install there, and systemd
+    // refuses a relative ExecStart=.
+    for var in ["PREFIX", "XDG_DATA_HOME", "XDG_CONFIG_HOME", "HOME"] {
+        let (code, err) = run(&[(var, "relative/dir".to_string())]);
+        assert_eq!(code, Some(2), "{var}=relative/dir was not refused: {err}");
+        assert!(err.contains(&format!("{var} must be an absolute path")), "{var}: the message does not name the variable: {err}");
+        assert!(nothing_written() && !root.0.join("relative").exists(), "{var}=relative/dir: files were written or the build started");
+    }
+    // Controls: absolute paths pass the checks and go on to the build (our fake cargo fails it).
+    for vars in [
+        vec![("PREFIX", abs("plain"))],
+        vec![("XDG_DATA_HOME", abs("data")), ("XDG_CONFIG_HOME", abs("config"))],
+        vec![("PREFIX", abs("plain")), ("XDG_DATA_HOME", abs("data")), ("XDG_CONFIG_HOME", abs("config"))],
+    ] {
+        let (code, err) = run(&vars);
+        assert_eq!(code, Some(1), "{vars:?} was refused: {err}");
+        assert!(ran.exists(), "{vars:?} never reached the build: {err}");
+    }
 }
 
-fn monitor_fake(refresh: f64) -> rog_control::sys::CaptureGuard {
+pub fn monitor_fake(refresh: f64) -> rog_control::sys::CaptureGuard {
     let text = json!([{"name": "eDP-1", "width": 2560, "height": 1440, "x": 0, "y": 0, "scale": 1, "refreshRate": refresh,
         "availableModes": ["2560x1440@60.00Hz", "2560x1440@240.00Hz"]}])
     .to_string();
@@ -745,20 +854,22 @@ fn nvidia__power_limit_parsing_and_clock_commands() {
     assert_eq!(calls.borrow()[1], strings(&["nvidia-settings", "-a", "[gpu:0]/GPUMemoryTransferRateOffset[3]=300"]));
 }
 
-fn automation_rig(cfg: serde_json::Value, on_battery: bool) -> (Rc<AutomationManager>, Calls) {
+/// The manager, the commands it hands to `run_cmd`, and the hook that records them. Keep the hook
+/// bound for as long as the manager is used and let it drop with the scope: a hook that outlives
+/// its test would swallow every `run_cmd` of the tests after it.
+fn automation_rig(cfg: serde_json::Value, on_battery: bool) -> (Rc<AutomationManager>, Calls, rog_control::sys::RunCmdGuard) {
     override_tool("powerprofilesctl", true);
     override_tool("notify-send", true);
     let (calls, guard) = record_run_cmd();
-    std::mem::forget(guard); // lives for the rest of the test via the returned calls handle
     let manager = AutomationManager::new(config::new_cfg(config::merge_defaults(cfg, &config::defaults())), Rc::new(|| {}));
     manager.set_on_battery(Some(on_battery));
-    (manager, calls)
+    (manager, calls, guard)
 }
 
 // guards: FR-28 - the remembered profile / keyboard level for the current power source is applied, and notified only on transitions
 fn automation__applies_remembered_state_per_power_source() {
     let cfg = json!({"automation": {"profile_ac": "Performance", "profile_battery": "Quiet", "kbd_ac": "high", "kbd_battery": "off"}});
-    let (ac, calls) = automation_rig(cfg.clone(), false);
+    let (ac, calls, _hook1) = automation_rig(cfg.clone(), false);
     ac.apply_all(false);
     let c = calls.borrow().clone();
     assert!(c.contains(&strings(&["asusctl", "profile", "set", "Performance"])), "{c:?}");
@@ -769,19 +880,19 @@ fn automation__applies_remembered_state_per_power_source() {
     pump(100);
     assert!(calls.borrow().iter().any(|x| x == &strings(&["notify-send", "-a", "ROG Control", "-t", "2000", "On AC power", "Automation applied"])), "{:?}", calls.borrow());
 
-    let (battery, calls) = automation_rig(cfg, true);
+    let (battery, calls, _hook2) = automation_rig(cfg, true);
     battery.apply_all(false);
     let c = calls.borrow().clone();
     assert!(c.contains(&strings(&["asusctl", "profile", "set", "Quiet"])), "{c:?}");
     assert!(c.contains(&strings(&["asusctl", "leds", "set", "off"])), "{c:?}");
 
     // A hand-edited config with garbage values must not reach the tools.
-    let (bad, calls) = automation_rig(json!({"automation": {"profile_ac": "Turbo; reboot", "kbd_ac": "maximum"}}), false);
+    let (bad, calls, _hook3) = automation_rig(json!({"automation": {"profile_ac": "Turbo; reboot", "kbd_ac": "maximum"}}), false);
     bad.apply_all(false);
     assert!(calls.borrow().is_empty(), "{:?}", calls.borrow());
 
     // Without a known power source nothing is applied at all.
-    let (unknown, calls) = automation_rig(cfg_profile_only(), false);
+    let (unknown, calls, _hook4) = automation_rig(cfg_profile_only(), false);
     unknown.set_on_battery(None);
     unknown.apply_all(false);
     assert!(calls.borrow().is_empty());
@@ -798,20 +909,20 @@ fn automation__gpu_optimized_guards() {
     {
         // Ultimate (MUX 0): automation has no dialog, so it must not write the MUX.
         let _s = sysfs_map(&[(GPU_MUX_PATH, "0"), (DGPU_DISABLE_PATH, "0")]);
-        let (m, calls) = automation_rig(cfg.clone(), false);
+        let (m, calls, _hook) = automation_rig(cfg.clone(), false);
         m.apply_all(false);
         assert!(!calls.borrow().iter().any(|c| c.iter().any(|a| a == "gpu_mux_mode" || a == "dgpu_disable")), "{:?}", calls.borrow());
     }
     let _s = sysfs_map(&[(GPU_MUX_PATH, "1"), (DGPU_DISABLE_PATH, "0")]);
     {
-        let (m, calls) = automation_rig(cfg.clone(), false); // on AC: dGPU stays on
+        let (m, calls, _hook) = automation_rig(cfg.clone(), false); // on AC: dGPU stays on
         m.apply_all(false);
         assert_eq!(calls.borrow().iter().filter(|c| c.iter().any(|a| a == "dgpu_disable")).cloned().collect::<Vec<_>>(), [strings(&["asusctl", "armoury", "set", "dgpu_disable", "0"])]);
     }
     {
         // On battery with the GPU busy: leave it alone.
         let _c = fake_capture(|argv| argv.get(1).is_some_and(|a| a.starts_with("--query-gpu=utilization")).then(|| ok_out("90\n")));
-        let (m, calls) = automation_rig(cfg.clone(), true);
+        let (m, calls, _hook) = automation_rig(cfg.clone(), true);
         m.apply_all(false);
         pump(300);
         assert!(!calls.borrow().iter().any(|c| c.iter().any(|a| a == "dgpu_disable")), "{:?}", calls.borrow());
@@ -819,7 +930,7 @@ fn automation__gpu_optimized_guards() {
     {
         // On battery and idle: disable it.
         let _c = fake_capture(|argv| argv.get(1).is_some_and(|a| a.starts_with("--query-gpu=utilization")).then(|| ok_out("3\n")));
-        let (m, calls) = automation_rig(cfg, true);
+        let (m, calls, _hook) = automation_rig(cfg, true);
         m.apply_all(false);
         pump(300);
         assert!(calls.borrow().contains(&strings(&["asusctl", "armoury", "set", "dgpu_disable", "1"])), "{:?}", calls.borrow());
@@ -841,6 +952,156 @@ fn tray__properties_match_the_wire_contract() {
     assert_eq!(tip.type_().as_str(), "(sa(iiay)ss)");
     assert_eq!(tip.child_value(2).str(), Some("ROG Control"));
     assert!(tip.child_value(3).str().is_some_and(|t| t.contains("Left-click")));
+}
+
+/// A stand-in for asusd on the system bus: it lists `children` under /xyz/ljones/aura, answers
+/// `LedModeData` only for the objects given to `answer`, and can be made absent or stuck.
+struct FakeAsusd {
+    children: RefCell<Vec<&'static str>>,
+    answering: RefCell<Vec<(String, gtk::glib::Variant)>>,
+    calls: RefCell<Vec<String>>,
+    absent: std::cell::Cell<bool>,
+    stuck: std::cell::Cell<bool>,
+}
+
+impl FakeAsusd {
+    fn new(children: &[&'static str]) -> Rc<Self> {
+        Rc::new(Self {
+            children: RefCell::new(children.to_vec()),
+            answering: RefCell::default(),
+            calls: RefCell::default(),
+            absent: std::cell::Cell::default(),
+            stuck: std::cell::Cell::default(),
+        })
+    }
+
+    fn answer(&self, name: &str, data: gtk::glib::Variant) {
+        self.answering.borrow_mut().push((format!("/xyz/ljones/aura/{name}"), data));
+    }
+
+    fn calls(&self) -> Vec<String> {
+        self.calls.borrow().clone()
+    }
+
+    fn hook(self: &Rc<Self>) -> AuraBusGuard {
+        let fake = self.clone();
+        hook_aura_bus(move |path, _interface, method, _args| {
+            fake.calls.borrow_mut().push(format!("{method} {path}"));
+            let err = |code: gtk::gio::DBusError, text: &str| Err(gtk::glib::Error::new(code, text));
+            if fake.stuck.get() {
+                return Err(gtk::glib::Error::new(gtk::gio::IOErrorEnum::TimedOut, "Timeout was reached"));
+            }
+            if fake.absent.get() {
+                return err(gtk::gio::DBusError::ServiceUnknown, "The name xyz.ljones.Asusd was not provided by any .service files");
+            }
+            match method {
+                "Introspect" if path == "/xyz/ljones/aura" => {
+                    // Shaped like the real reply: children carry their interfaces.
+                    let nodes: String = fake.children.borrow().iter().map(|c| format!(r#"<node name="{c}"><interface name="xyz.ljones.Aura"/></node>"#)).collect();
+                    Ok((format!(r#"<node><interface name="org.freedesktop.DBus.Properties"/>{nodes}</node>"#),).to_variant())
+                }
+                "Get" => match fake.answering.borrow().iter().find(|(p, _)| p == path) {
+                    Some((_, data)) => Ok((data.clone(),).to_variant()), // `(v)`: the property value, boxed once
+                    None => err(gtk::gio::DBusError::UnknownObject, &format!("Unknown object '{path}'")),
+                },
+                _ => err(gtk::gio::DBusError::UnknownMethod, "no such method"),
+            }
+        })
+    }
+}
+
+fn breathe_data(speed: &str, direction: &str) -> gtk::glib::Variant {
+    (1u32, 0u32, (247u8, 182u8, 185u8), (230u8, 189u8, 190u8), speed, direction).to_variant()
+}
+
+fn breathe_state(speed: &str, direction: &str) -> AuraState {
+    AuraState { effect: "breathe".into(), colour1: "f7b6b9".into(), colour2: "e6bdbe".into(), speed: speed.into(), direction: direction.into() }
+}
+
+// guards: FR-19 - the Aura object is found by asking asusd what it exports, whatever it is called, and then remembered
+fn aura__discovery_finds_the_exported_object_and_remembers_it() {
+    // The name carries the USB bus number and has changed between boots (19b6_3_3 -> 19b6_2_3):
+    // any exported name must work, and the decoys on either side of it must be skipped.
+    for exported in ["19b6_2_3", "19b6_3_3", "04f2_1_7"] {
+        let asusd = FakeAsusd::new(&["0000_decoy", exported, "zzzz_decoy"]);
+        asusd.answer(exported, breathe_data("Med", "Right"));
+        let _bus = asusd.hook();
+        assert_eq!(read_aura_state(), Some(breathe_state("med", "right")), "{exported}");
+        assert_eq!(read_aura_state(), Some(breathe_state("med", "right")), "{exported}: second read");
+        let object = format!("/xyz/ljones/aura/{exported}");
+        assert_eq!(
+            asusd.calls(),
+            ["Introspect /xyz/ljones/aura", "Get /xyz/ljones/aura/0000_decoy", &format!("Get {object}"), &format!("Get {object}")],
+            "{exported}: found by introspection, then read straight from the remembered object"
+        );
+    }
+}
+
+// guards: FR-19 - no asusd, no Aura object, nobody answering, or asusd stuck: the read fails soft with None
+fn aura__read_fails_soft_when_nothing_answers() {
+    let absent = FakeAsusd::new(&["19b6_2_3"]);
+    absent.answer("19b6_2_3", breathe_data("Med", "Right"));
+    absent.absent.set(true);
+    let _bus = absent.hook();
+    assert_eq!(read_aura_state(), None, "asusd not running");
+    assert_eq!(absent.calls().len(), 1, "gave up after the first refusal: {:?}", absent.calls());
+    drop(_bus);
+
+    let empty = FakeAsusd::new(&[]);
+    let _bus = empty.hook();
+    assert_eq!(read_aura_state(), None, "asusd exports no Aura object");
+    drop(_bus);
+
+    let mute = FakeAsusd::new(&["19b6_2_3", "19b6_2_4"]);
+    let _bus = mute.hook();
+    assert_eq!(read_aura_state(), None, "objects listed but none answers LedModeData");
+    assert_eq!(mute.calls().len(), 3, "{:?}", mute.calls());
+    drop(_bus);
+
+    // A stuck asusd costs one capped call, not a second one for the lookup.
+    let stuck = FakeAsusd::new(&["19b6_2_3"]);
+    stuck.answer("19b6_2_3", breathe_data("Med", "Right"));
+    let _bus = stuck.hook();
+    assert!(read_aura_state().is_some());
+    stuck.stuck.set(true);
+    stuck.calls.borrow_mut().clear();
+    assert_eq!(read_aura_state(), None);
+    assert_eq!(stuck.calls(), ["Get /xyz/ljones/aura/19b6_2_3"], "a timeout must not trigger a lookup");
+    stuck.stuck.set(false);
+    assert!(read_aura_state().is_some(), "reads again once asusd answers");
+}
+
+// guards: FR-19 - a remembered Aura object that stops answering (asusd re-exported it elsewhere) is looked up again
+fn aura__stale_remembered_object_is_rediscovered() {
+    let asusd = FakeAsusd::new(&["19b6_3_3"]);
+    asusd.answer("19b6_3_3", breathe_data("Low", "Left"));
+    let _bus = asusd.hook();
+    assert_eq!(read_aura_state(), Some(breathe_state("low", "left")));
+
+    // asusd restarts and exports the same keyboard under a new name.
+    *asusd.children.borrow_mut() = vec!["19b6_2_3"];
+    *asusd.answering.borrow_mut() = vec![("/xyz/ljones/aura/19b6_2_3".to_string(), breathe_data("Med", "Right"))];
+    asusd.calls.borrow_mut().clear();
+    assert_eq!(read_aura_state(), Some(breathe_state("med", "right")), "kept reading the object that is gone");
+    assert_eq!(asusd.calls(), ["Get /xyz/ljones/aura/19b6_3_3", "Introspect /xyz/ljones/aura", "Get /xyz/ljones/aura/19b6_2_3"]);
+    asusd.calls.borrow_mut().clear();
+    assert_eq!(read_aura_state(), Some(breathe_state("med", "right")));
+    assert_eq!(asusd.calls(), ["Get /xyz/ljones/aura/19b6_2_3"], "the new object was not remembered");
+}
+
+// guards: FR-19 - the Keyboard panel shows what asusd reports and an edit keeps the keyboard's real second colour, speed and direction
+fn keyboard_panel__shows_and_preserves_what_asusd_reports() {
+    let asusd = FakeAsusd::new(&["19b6_2_3"]);
+    asusd.answer("19b6_2_3", breathe_data("Low", "Left"));
+    let _bus = asusd.hook();
+    let (calls, _g) = record_run_cmd();
+    let panel = KeyboardPanel::new(no_toast(), make_cfg(), no_save(), on_ac(), Rc::new(|| {}));
+    pump(50);
+    assert_eq!(panel.effect_dropdown.selected(), effect_index("breathe"), "the dropdown does not show the effect asusd reports");
+    panel.colour_btn.set_rgba(&hex_to_gdk_rgba("112233"));
+    pump(400);
+    let sent = aura_effect_cmds(&calls);
+    assert_eq!(sent, vec![strings(&["asusctl", "aura", "effect", "breathe", "--colour", "112233", "--colour2", "e6bdbe", "--speed", "low"])]);
 }
 
 // guards: FR-19 - asusd's LedModeData is decoded, and each effect only sends the fields it takes

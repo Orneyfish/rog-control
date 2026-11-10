@@ -718,26 +718,24 @@ pub struct StartupPanel {
     pub root: gtk::Box,
     pub switch: gtk::Switch,
     suppress: Rc<Suppress>,
-    toast: ToastCb,
 }
 
 impl StartupPanel {
     pub fn new(toast: ToastCb) -> Rc<Self> {
         let suppress = Rc::new(Suppress::new(false));
         let handler_suppress = suppress.clone();
-        let handler_toast = toast.clone();
         // This is a checkbox in G-Helper's designer; a switch reads better in this app's control
         // language, with the same on/off semantics.
         let row = switch_row("Run on Startup", move |_, state| {
             if !handler_suppress.get() {
                 let verb = if state { "enable" } else { "disable" };
-                run_cmd(&["systemctl", "--user", verb, "rog-control.service"], Some(report_cb(&handler_toast)));
+                run_cmd(&["systemctl", "--user", verb, "rog-control.service"], Some(report_cb(&toast)));
             }
             glib::Propagation::Proceed
         });
         let root = vbox(4);
         root.append(&row.root);
-        let this = Rc::new(Self { root, switch: row.switch, suppress, toast });
+        let this = Rc::new(Self { root, switch: row.switch, suppress });
         this.refresh();
         this
     }
@@ -752,11 +750,6 @@ impl StartupPanel {
                 }
             },
         );
-    }
-
-    /// Test seam: the toast sink this panel reports failures to.
-    pub fn toast(&self) -> &ToastCb {
-        &self.toast
     }
 }
 

@@ -16,6 +16,8 @@ mod extra;
 mod ported;
 #[path = "e2e/startup.rs"]
 mod startup;
+#[path = "e2e/toasts.rs"]
+mod toasts;
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::time::Instant;
@@ -32,6 +34,7 @@ fn main() {
     let mut all: Vec<(&'static str, fn())> = Vec::new();
     all.extend(ported::tests());
     all.extend(extra::tests());
+    all.extend(toasts::tests());
     let selected: Vec<_> = all.into_iter().filter(|(n, _)| filter.as_deref().is_none_or(|f| n.contains(f))).collect();
 
     println!("\nrunning {} tests", selected.len());
@@ -41,7 +44,9 @@ fn main() {
         use std::io::Write;
         print!("test {name} ... ");
         let _ = std::io::stdout().flush();
-        match catch_unwind(AssertUnwindSafe(test)) {
+        let outcome = catch_unwind(AssertUnwindSafe(test));
+        rog_control::sys::clear_tool_overrides(); // a test that failed midway must not leave "tool X is installed" behind
+        match outcome {
             Ok(()) => match common::take_skip() {
                 Some(reason) => {
                     println!("SKIPPED ({reason})");
