@@ -1,28 +1,11 @@
-$ E12 check script (python names from git show 509d5e4:tests/test_e2e.py; HOME=$H PATH=$FAKE:$PATH cargo test --locked)
+$ bash $T/e12.sh   (E12 commands as written in evals.md, run at the repo root with HOME=$H PATH=$FAKE:$PATH)
 python tests: 67   ported: 67
 names identical
 cargo test rc=0
-...
-all test result lines:
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
-test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
-test result: ok. 104 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 16.40s
-test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
-non-read tool calls during tests:
-(end list)
-/home/orneyfish/.config/rog-control/config.json: OK
-movewindowpixel count: 0
-total tool calls logged: 66
-per-test ok lines in cargo output: 102; SKIPPED lines: 0; #[ignore] attrs in src/tests: 0
---- last 15 lines of cargo test output:
-test aura__led_mode_data_and_effect_commands ... ok
-test helpers__python_compatible_rounding_and_formatting ... ok
-test battery_text__charging_and_health ... ok
-test theme__filters_only_known_environment_noise ... ok
 
 (9 write commands were swallowed by the fail-closed guard)
 
-test result: ok. 104 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 16.40s
+test result: ok. 120 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 31.49s
 
    Doc-tests rog_control
 
@@ -30,3 +13,22 @@ running 0 tests
 
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
+--- all test result lines:
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 120 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 31.49s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+non-read tool calls during tests:
+(end of list; total fake log lines: 123)
+/home/orneyfish/.config/rog-control/config.json: OK
+movewindowpixel in src: 0
+--- cargo Running lines:
+     Running unittests src/lib.rs (target/debug/deps/rog_control-c0ca6eb106630b66)
+running 1 test
+     Running unittests src/main.rs (target/debug/deps/rog_control-2154af53ad5bc0b4)
+running 0 tests
+     Running tests/e2e.rs (target/debug/deps/e2e-d660e107e626ebb3)
+running 120 tests
+   Doc-tests rog_control
+running 0 tests
+--- count of 'ok' test lines: 115  FAILED lines: 0  ignored/SKIPPED lines: 0

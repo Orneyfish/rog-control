@@ -162,14 +162,23 @@ kill $pid; wait $pid 2>/dev/null
 
 ## E8: Companion windows match the reference; open, close and reopen behave
 - covers: FR-6, FR-10, FR-13, FR-15, NFR-6
-- check: continues E7's shell (same variables, service still running on the real bus; if you restarted, redo its first three lines):
+- check: continues E7's shell (same variables, service still running on the real bus; if you restarted, redo its first three lines). First build the one extra reference the Keyboard Lighting window needs (user decision D16): the Python app's hard-coded asusd path is stale on this machine, so its capture always shows `static`, while the Rust window follows what asusd reports. Compare against Python with ONLY that path constant pointed at the real Aura object (run this before the Rust app opens any window, so the Python windows are not mixed up with Rust ones):
+```
+AURA=$(busctl --system tree xyz.ljones.Asusd --list 2>/dev/null | grep -m1 '^/xyz/ljones/aura/')      # read-only; e.g. /xyz/ljones/aura/19b6_2_3
+mkdir -p $T/refP $T/refshotsP; git archive 509d5e4 | tar -x -C $T/refP
+[ -n "$AURA" ] && sed -i "s#^AURA_OBJECT_PATH = .*#AURA_OBJECT_PATH = \"$AURA\"#" $T/refP/main.py
+echo "patched reference path: [$AURA]  occurrences in refP/main.py: $(grep -c "AURA_OBJECT_PATH = \"$AURA\"" $T/refP/main.py)"
+PATH=$FAKE:$PATH python3 specs/rust-rewrite/harness/shoot_ref.py $T/refP $T/refshotsP                 # ~12 s; only Keyboard_Lighting.png is used from it
+```
+  Then:
 ```
 for row in "fans|Fans and Power|Fans_and_Power" "lighting|Keyboard Lighting|Keyboard_Lighting" "extra|Extra|Extra"; do
   IFS='|' read key title file <<<"$row"
   ctl OpenWindow s $key >/dev/null; wait_win "$title" 1 3 || echo "FAIL $title did not open"; sleep 2
   ctl OpenWindow s $key >/dev/null; sleep 1; echo "$title windows after second open: $(win "$title")"
   read w h x y addr <<<"$(specs/rust-rewrite/harness/shoot.sh "$title" $T/rust/$file.png)"
-  sizeok $T/rust/$file.png $T/refshots/$file.png && imgsame $T/rust/$file.png $T/refshots/$file.png && echo "$title look-ok" || echo "FAIL $title look"
+  ref=$T/refshots/$file.png; [ "$key" = lighting ] && ref=$T/refshotsP/$file.png     # Keyboard Lighting: the path-patched Python capture
+  sizeok $T/rust/$file.png $ref && imgsame $T/rust/$file.png $ref && echo "$title look-ok" || echo "FAIL $title look"
   echo "$title at x=$x y=$y   reference: $(grep "^shot $title " $T/refshots/geom.txt)"
   closewin $addr; wait_win "$title" 0 3 && echo "$title closed" || echo "FAIL $title did not close"
   ping_svc 2 >/dev/null && echo "service alive" || echo "FAIL service died after closing $title"
@@ -183,7 +192,7 @@ read w h x y addr <<<"$(specs/rust-rewrite/harness/shoot.sh 'Fans and Power' $T/
 imgsame $T/rust/fans2.png $T/refshots/Fans_and_Power.png && echo "reopened fans look-ok" || echo "FAIL reopened fans differs"
 closewin $addr; kill $pid; wait $pid 2>/dev/null
 ```
-- pass when: each companion prints `look-ok`; `windows after second open: 1` (never two); the printed `x=`/`y=` equal the reference's `x y` (the `shot <title> w h x y` line) within 4 px (the Hyprland rules in `rules.lua` pin them); every close prints `closed` and `service alive`; main-close prints `main close hides, service alive`; main reopens; the reopened Fans and Power window prints `reopened fans look-ok` (a closed companion is rebuilt fresh, not stuck in a half-destroyed state).
+- pass when: each companion prints `look-ok` (the Keyboard Lighting window against the path-patched Python capture, which must therefore be pixel-near-identical: if asusd reports `static` or has no Aura object, the patch changes nothing and the plain capture is used); `windows after second open: 1` (never two); the printed `x=`/`y=` equal the reference's `x y` (the `shot <title> w h x y` line) within 4 px (the Hyprland rules in `rules.lua` pin them); every close prints `closed` and `service alive`; main-close prints `main close hides, service alive`; main reopens; the reopened Fans and Power window prints `reopened fans look-ok` (a closed companion is rebuilt fresh, not stuck in a half-destroyed state).
 - fail when: a companion window has the wrong title or class (the rules then misplace it), opens twice, differs in size or look, a close kills the service, or closing the main window quits the app instead of hiding it.
 
 ## E9: Hostile and concurrent D-Bus input

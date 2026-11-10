@@ -1,4 +1,4 @@
-$ E19 check from evals.md (includes a real hyprctl reload)
+$ bash $T/e19.sh   (E19 check exactly as in evals.md; real hyprctl reload)
 1
 1
 108
@@ -15,3 +15,4 @@ bound binary exists
 lua parses
 ok
 config errors: []
+rc=0

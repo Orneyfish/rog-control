@@ -1,4 +1,4 @@
-$ timeout 180 dbus-run-session -- bash $T/e6.sh   (E6 script from evals.md; platform_profile at start was: performance)
+$ timeout 180 dbus-run-session -- bash $T/e6.sh   (script as written in evals.md E6; portal/dbus-daemon log noise removed)
 registered: :1.3/StatusNotifierItem
 s "rog-control"
 s "ROG Control"

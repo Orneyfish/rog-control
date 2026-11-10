@@ -1,5 +1,5 @@
-$ E16 script from evals.md
-    Finished `release` profile [optimized] target(s) in 0.11s
+$ bash $T/e16.sh   (E16 check exactly as in evals.md)
+    Finished `release` profile [optimized] target(s) in 0.10s
     Finished `release` profile [optimized] target(s) in 0.03s
 second install changed nothing
 unit backup is the exact original
@@ -8,3 +8,4 @@ live unit replaced
     Finished `release` profile [optimized] target(s) in 0.03s
 backup never overwritten
 1
+rc=0

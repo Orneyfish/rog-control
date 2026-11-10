@@ -1,10 +1,10 @@
 $ cargo build --release --locked && ls -l target/release/rog-control && file target/release/rog-control && ldd target/release/rog-control | grep -ci python; git ls-files Cargo.lock; cargo clippy --all-targets --locked -- -D warnings; echo clippy=$?; grep -cE "^(tokio|async-std|smol|pyo3|cpython)" Cargo.toml
-    Finished `release` profile [optimized] target(s) in 0.03s
--rwxr-xr-x 2 orneyfish orneyfish 1764688 Nov 10 13:17 target/release/rog-control
-target/release/rog-control: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, for GNU/Linux 6.1.0, BuildID[sha1]=add34ff67714edffd23c0a480983dc5a3c96b21a, not stripped
-0
-chain-rc(last grep -c python; 1 means python count 0 so grep exits 1)=1
+    Finished `release` profile [optimized] target(s) in 0.06s
+build rc=0
+-rwxr-xr-x 2 orneyfish orneyfish 1780352 Nov 10 17:19 target/release/rog-control
+target/release/rog-control: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, for GNU/Linux 6.1.0, BuildID[sha1]=5fe548b4ac8c988af997deeaf78b58e586d0ab39, not stripped
+ldd python count: 0
 Cargo.lock
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.07s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
 clippy=0
-0
+async/python deps in Cargo.toml: 0

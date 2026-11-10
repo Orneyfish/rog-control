@@ -1,18 +1,31 @@
-$ E7 check (python3 harness/shoot_ref.py then Rust app on real session bus, real HOME, fake tools first on PATH)
-python reference shots:
+$ bash $T/e7.sh   (E7 script as written in evals.md; real session bus, real HOME, fake tools first on PATH, real service stopped)
+
+(python3:408729): Gtk-WARNING **: 19:05:34.700: Theme parser error: gtk.css:312:16-28: Unknown name of pseudo-class
+ERROR:dbus.proxies:Introspect error on :1.30:/xyz/ljones/aura/19b6_3_3: dbus.exceptions.DBusException: org.freedesktop.DBus.Error.UnknownObject: Unknown object '/xyz/ljones/aura/19b6_3_3'
+ERROR:dbus.proxies:Introspect error on :1.30:/xyz/ljones/aura/19b6_3_3: dbus.exceptions.DBusException: org.freedesktop.DBus.Error.UnknownObject: Unknown object '/xyz/ljones/aura/19b6_3_3'
+
+(python3:408729): Gtk-CRITICAL **: 19:05:35.733: Unable to connect to the accessibility bus at 'unix:path=/run/user/1000/at-spi/bus_1': Could not connect: Connection refused
 shot ROG Control 494 913 1033 264
 shot Fans and Power 560 760 40 340
+ERROR:dbus.proxies:Introspect error on :1.30:/xyz/ljones/aura/19b6_3_3: dbus.exceptions.DBusException: org.freedesktop.DBus.Error.UnknownObject: Unknown object '/xyz/ljones/aura/19b6_3_3'
+ERROR:dbus.proxies:Introspect error on :1.30:/xyz/ljones/aura/19b6_3_3: dbus.exceptions.DBusException: org.freedesktop.DBus.Error.UnknownObject: Unknown object '/xyz/ljones/aura/19b6_3_3'
 shot Keyboard Lighting 380 480 40 480
 shot Extra 453 320 40 560
-rust:
 494 913 1033 264 0x55b3de084020
 494 913 vs 494 913
 size-ok
-0.0005 0.0011
+0.0009 0.0069
 look-ok
 control ok (a different window is rejected)
 stderr offenders: 0
-e7.err bytes: 0
-extra (spec ref/ROG_Control.png vs rust, AE3 RMSE_small): 0.0011 0.0057
-files: E7-main-window-rust.png, E7-main-window-python-ref-live.png, E7-side-by-side-*.png
-checklist (viewed side by side): title ROG Control + 'ROG Strix G733ZW'; headings Performance Mode, GPU Mode, Screen, Laptop Keyboard, Battery Charge Limit: 100%, Run on Startup; buttons Silent Balanced Turbo Fans+Power Eco Standard Ultimate Optimized Auto 60Hz 240Hz+OD Off Low Medium High Extra, effect dropdown 'static' + colour swatch, Full, Firmware, Quit; all icons present; live labels CPU temp/fan, GPU temp/fan present (values differ only by time of capture).
+rc=143
+(rc=143 is the final 'wait $pid' of the killed app; the Python stderr lines above come from the Python reference, 'stderr offenders' counts only the Rust app's stderr)
+--- spec ref comparison (static ref image in git): 0.0015 0.0089 (live values differ: CPU temp / GPU temp / fan)
+--- Keyboard exception: asusd read (read-only busctl):
+$ busctl --system tree xyz.ljones.Asusd --list | grep -m1 ^/xyz/ljones/aura/
+/xyz/ljones/aura/19b6_2_3  (Python's hard-coded path is .../19b6_3_3, stale)
+$ busctl --system get-property xyz.ljones.Asusd /xyz/ljones/aura/19b6_2_3 xyz.ljones.Aura LedModeData
+(uu(yyy)(yyy)ss) 1 0 247 182 185 230 189 190 "Med" "Right"
+AURA_MODE_INDEX (src/hw.rs:178): ("breathe", 1)  => expected effect: breathe, colour1 (247,182,185)=#F7B6B9, speed Med, direction Right
+Rust capture shows 'breathe' with a pink swatch; Python capture (stale path) shows 'static'.
+--- checklist (viewed /home/orneyfish/Projects/rog-control/specs/rust-rewrite/evidence/E7-main-window-rust.png beside E7-main-window-python-ref-live.png and specs/rust-rewrite/ref/ROG_Control.png): title 'ROG Control' + 'ROG Strix G733ZW'; headings Performance Mode / GPU Mode / Screen / Laptop Keyboard / Battery Charge Limit: 100% / Run on Startup; buttons Silent Balanced Turbo Fans+Power Eco Standard Ultimate Optimized Auto 60Hz 240Hz+OD Off Low Medium High Extra, effect dropdown (breathe) + pink swatch, Full / 100% pill, Firmware, Quit; every section icon present; live labels 'CPU: 57C Fan: 3000 RPM', 'GPU: 46.97C Fan: 3000 RPM', 'Battery Charge Limit: 100%'.

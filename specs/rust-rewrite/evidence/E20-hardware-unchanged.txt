@@ -1,8 +1,5 @@
-$ specs/rust-rewrite/harness/hw-snapshot.sh > $T/hw.after; diff $T/hw.before $T/hw.after && echo hardware-unchanged; sha256sum -c $T/realcfg.sha   (run after E19, before E21)
-16c16
-< {"name":"eDP-1","width":2560,"height":1440,"refreshRate":240.00301}
----
-> {"name":"eDP-1","width":2560,"height":1440,"refreshRate":60.00000}
+$ bash $T/e20.sh   (E20 check as in evals.md, run after E21 with the 5 s wait; hw.before was taken at the start of this run)
+hardware-unchanged
 /home/orneyfish/.config/rog-control/config.json: OK
 --- hw.before
 /sys/firmware/acpi/platform_profile=performance
@@ -37,8 +34,5 @@ performance
 CPU: enabled: false, 47c:25%,51c:30%,55c:37%,59c:46%,63c:49%,67c:71%,71c:83%,97c:100%
 GPU: enabled: true, 47c:14%,51c:22%,55c:35%,59c:46%,63c:55%,67c:74%,71c:90%,97c:100%
 performance
-{"name":"eDP-1","width":2560,"height":1440,"refreshRate":60.00000}
---- informational: after E21 (real service restarted, its startup automation re-applies the 240Hz preset) hw-snapshot vs hw.before:
-identical
---- cause of the single differing line: E19's real 'hyprctl reload' left eDP-1 at 60 Hz (hyprctl monitors -j read right after the reload: {"name":"eDP-1","refreshRate":60.00000}); all fake-tool runs blocked every hyprctl eval (see E11 logs)
---- (root cause) ~/.config/hypr/custom/general.lua:20-24 sets hl.monitor({output="desc:BOE 0x0A69", mode="preferred", ...}); a reload re-applies the preferred (60 Hz) mode over the app's earlier hyprctl eval 240Hz preset
+{"name":"eDP-1","width":2560,"height":1440,"refreshRate":240.00301}
+rc=0

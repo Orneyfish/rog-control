@@ -1,4 +1,4 @@
-$ E18 script from evals.md (HI=$T/inst2)
+$ bash $T/e18.sh   (E18 check exactly as in evals.md)
 ==> stopping and disabling rog-control.service
 ==> removing installed files (config and *.pre-rust backups are kept)
 uninstall rc=0
@@ -12,3 +12,4 @@ user data and unrelated files untouched
 ==> stopping and disabling rog-control.service
 ==> removing installed files (config and *.pre-rust backups are kept)
 second uninstall rc=0
+rc=0

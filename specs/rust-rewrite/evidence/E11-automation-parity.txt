@@ -1,4 +1,4 @@
-$ timeout 180 dbus-run-session -- bash $T/e11.sh   (E11 script from evals.md; system is on AC power)
+$ timeout 180 dbus-run-session -- bash $T/e11.sh   (script as written in evals.md E11; portal/dbus-daemon log noise removed)
 --- python
 asusctl armoury set panel_overdrive 1
 asusctl leds set high
@@ -17,6 +17,5 @@ powerprofilesctl set performance
 identical
 writes: 5
 config untouched
+notify-send/reboot lines: py=0 rust=0
 rc=0
-notify-send/systemctl lines in either set: /tmp/claude-1000/-home-orneyfish-Projects-rog-control/a9cc1c8e-9e10-43a5-a5fc-a371a282def2/scratchpad/t3/rust.set:0 /tmp/claude-1000/-home-orneyfish-Projects-rog-control/a9cc1c8e-9e10-43a5-a5fc-a371a282def2/scratchpad/t3/py.set:0 
-rust stderr:

@@ -1,4 +1,4 @@
-$ E17 script from evals.md (HI=$T/inst2, a fully installed home)
+$ bash $T/e17.sh   (E17 check exactly as in evals.md)
 ==> building (cargo build --release --locked)
 cargo: simulated failure
 install.sh: the build failed; nothing was installed and the service was not touched.
@@ -15,3 +15,4 @@ On Arch / CachyOS install them with:  sudo pacman -S rust gtk4 libadwaita
 Nothing was installed.
 prerequisite failures: nothing changed
 systemctl state changes: 0
+rc=0

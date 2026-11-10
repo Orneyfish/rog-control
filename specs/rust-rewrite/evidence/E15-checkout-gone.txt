@@ -1,7 +1,7 @@
-$ mv $T/src $T/src.gone; E15 script from evals.md as private-bus script (installed binary, HOME=$HI, checkout copy moved away)
+$ timeout 180 dbus-run-session -- bash $T/e15.sh   (script as written in evals.md E15; portal/dbus-daemon noise removed)
 up
 IconThemePath=$T/inst/.local/share/icons
 tray icon file found
 inside the install prefix
 window opens
-(/usr/lib/xdg-desktop-portal:54556): xdg-desktop-portal-WARNING **: 16:30:26.801: Failed to close session implementation: The connection is closed
+rc=0

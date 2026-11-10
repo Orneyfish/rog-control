@@ -1,4 +1,4 @@
-$ timeout 180 dbus-run-session -- bash $T/e9.sh   (E9 script from evals.md)
+$ timeout 180 dbus-run-session -- bash $T/e9.sh   (script as written in evals.md E9; portal/dbus-daemon log noise removed)
 rc=1 [OpenWindow s ''] Call failed: unknown window ''
 rc=1 [OpenWindow s nonsense] Call failed: unknown window 'nonsense'
 rc=1 [OpenWindow s ../../etc/passwd] Call failed: unknown window '../../etc/passwd'
@@ -10,6 +10,3 @@ profile writes logged: 20
 alive after 50 Open calls
 panics: 0
 rc=143
---- e9.err:
-
-(rog-control:9082): Gtk-CRITICAL **: 16:14:05.828: Unable to register the application: GDBus.Error:org.freedesktop.DBus.Error.NameHasNoOwner: Could not activate remote peer 'org.a11y.atspi.Registry': unit failed

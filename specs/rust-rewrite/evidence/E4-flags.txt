@@ -1,26 +1,15 @@
-$ timeout 180 dbus-run-session -- bash $T/e4.sh   (E4 script from evals.md)
+$ timeout 180 dbus-run-session -- bash $T/e4.sh   (script as written in evals.md E4; portal/dbus-daemon log noise removed)
 no service: rc=0 in 0s msg=[ROG Control service not reachable: GDBus.Error:org.freedesktop.DBus.Error.ServiceUnknown: The name com.orneyfish.RogControl.Hotkeys was not provided by any .service files]
 open rc=0
 shown
 hidden
 forward from performance:
-asusctl profile set Quiet
 powerprofilesctl set power-saver
+asusctl profile set Quiet
 expect: asusctl profile set Quiet + powerprofilesctl set power-saver
 back from performance:
-asusctl profile set Balanced
 powerprofilesctl set balanced
+asusctl profile set Balanced
 expect: asusctl profile set Balanced + powerprofilesctl set balanced
 rc=143
-
---- supplementary run (same app, prints the WHOLE tool log after each cycle to show nothing else was written)
-full log after forward:
-asusctl profile set Quiet
-powerprofilesctl set power-saver
-notify-send -a ROG Control -t 2000 Performance mode Silent
-full log after back:
-powerprofilesctl set balanced
-asusctl profile set Balanced
-notify-send -a ROG Control -t 2000 Performance mode Balanced
-(/usr/lib/xdg-desktop-portal:6377): xdg-desktop-portal-WARNING **: 16:11:43.517: Failed to close session implementation: The connection is closed
-rc=0
+note: script's final rc=143 is only 'wait $pid' returning the SIGTERM status of the killed service (last command of the script); FAKE_LOG after the back-cycle held exactly: powerprofilesctl set balanced / asusctl profile set Balanced / notify-send -a ROG Control -t 2000 Performance mode Balanced (the notification matches Python's cycle_profile -> notify_osd)

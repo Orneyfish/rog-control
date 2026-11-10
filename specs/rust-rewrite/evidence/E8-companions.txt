@@ -1,4 +1,17 @@
-$ E8 check (continues E7 shell; real session bus; app restarted so first three lines redone)
+$ bash $T/e8pre.sh   (E8 prelude exactly as written, before the Rust app opened any window)
+patched reference path: [/xyz/ljones/aura/19b6_2_3]  occurrences in refP/main.py: 1
+shot ROG Control 494 913 1033 264
+shot Fans and Power 560 760 40 340
+shot Keyboard Lighting 380 480 40 480
+shot Extra 453 320 40 560
+rc=0
+diff of refP/main.py vs git show 509d5e4:main.py (only the path constant):
+189c189
+< AURA_OBJECT_PATH = "/xyz/ljones/aura/19b6_3_3"
+---
+> AURA_OBJECT_PATH = "/xyz/ljones/aura/19b6_2_3"
+
+$ bash $T/e8.sh   (E8 loop exactly as written; E7 first-three-lines app start prepended; real session bus)
 Fans and Power windows after second open: 1
 560 760 vs 560 760
 0.0000 0.0000
@@ -24,13 +37,29 @@ main close hides, service alive
 main reopens
 0.0000 0.0000
 reopened fans look-ok
-e8.err (stderr of the app):
-
-(rog-control:8190): Gdk-WARNING **: 16:13:33.016: (../gtk/gdk/gdkframetimings.c:443):gdk_frame_timings_throttling_hint: runtime check failed: (self->result != GDK_FRAME_PREPARING)
---- byte-level: rust companion PNGs sha256 vs python reference PNGs
-3d2d6e7d08f89b7b6e5e  rust/Fans_and_Power.png
-3d2d6e7d08f89b7b6e5e  refshots/Fans_and_Power.png
-6692b3066deff2823783  rust/Keyboard_Lighting.png
-6692b3066deff2823783  refshots/Keyboard_Lighting.png
-62902b34663cb12fdc35  rust/Extra.png
-62902b34663cb12fdc35  refshots/Extra.png
+rc=143
+(rc=143 = final 'wait $pid' of the SIGTERMed app)
+--- extra checks (my own, not in evals.md)
+== Fans_and_Power vs /tmp/claude-1000/-home-orneyfish-Projects-rog-control/a9cc1c8e-9e10-43a5-a5fc-a371a282def2/scratchpad/t5/refshots
+30416 /tmp/claude-1000/-home-orneyfish-Projects-rog-control/a9cc1c8e-9e10-43a5-a5fc-a371a282def2/scratchpad/t5/refshots/Fans_and_Power.png
+30416 /tmp/claude-1000/-home-orneyfish-Projects-rog-control/a9cc1c8e-9e10-43a5-a5fc-a371a282def2/scratchpad/t5/rust/Fans_and_Power.png
+90b25cd2fbeb505e
+90b25cd2fbeb505e
+exact differing pixels (AE, fuzz 0): 0 (0)
+560 x 760, unique colours 1268
+== Keyboard_Lighting vs /tmp/claude-1000/-home-orneyfish-Projects-rog-control/a9cc1c8e-9e10-43a5-a5fc-a371a282def2/scratchpad/t5/refshotsP
+17971 /tmp/claude-1000/-home-orneyfish-Projects-rog-control/a9cc1c8e-9e10-43a5-a5fc-a371a282def2/scratchpad/t5/refshotsP/Keyboard_Lighting.png
+17971 /tmp/claude-1000/-home-orneyfish-Projects-rog-control/a9cc1c8e-9e10-43a5-a5fc-a371a282def2/scratchpad/t5/rust/Keyboard_Lighting.png
+31924c5c812c3fe6
+31924c5c812c3fe6
+exact differing pixels (AE, fuzz 0): 0 (0)
+380 x 480, unique colours 771
+== Extra vs /tmp/claude-1000/-home-orneyfish-Projects-rog-control/a9cc1c8e-9e10-43a5-a5fc-a371a282def2/scratchpad/t5/refshots
+13987 /tmp/claude-1000/-home-orneyfish-Projects-rog-control/a9cc1c8e-9e10-43a5-a5fc-a371a282def2/scratchpad/t5/refshots/Extra.png
+13987 /tmp/claude-1000/-home-orneyfish-Projects-rog-control/a9cc1c8e-9e10-43a5-a5fc-a371a282def2/scratchpad/t5/rust/Extra.png
+a5160efb72f92091
+a5160efb72f92091
+exact differing pixels (AE, fuzz 0): 0 (0)
+453 x 320, unique colours 990
+unpatched python capture vs rust Keyboard Lighting (AE3 RMSE_small): 0.0239 0.0755  <- fails the threshold, shows the comparison discriminates; this is what round 3 saw
+evidence/E8-keyboard-lighting-python-pathfixed-left-rust-right.png: left = path-patched Python (breathe, colour + second colour + speed med), right = Rust: identical; evidence/E8-keyboard-lighting-python-left-rust-right.png: left = plain Python (static)
