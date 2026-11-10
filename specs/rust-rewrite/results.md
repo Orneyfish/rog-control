@@ -1,6 +1,6 @@
 # Results: rust-rewrite
 **Updated:** 2026-11-10 14:06:28Z
-**Review:** pending
+**Review:** pending (round-4 reviewer stopped by a user pause; F14/F15 fixes not yet independently reviewed)
 
 | eval | result | evidence |
 |------|--------|----------|
@@ -25,7 +25,7 @@
 | E19 | pass | evidence/E19-keybinds.txt: reverse-edit hash matches original, 108 lines, 4 binds as required, lua parses, configerrors [] |
 | E20 | pass | evidence/E20-hardware-unchanged.txt: run after E21 with the 5 s wait: hardware-unchanged, config hash OK |
 | E21 | pass | evidence/E21-real-deployment.txt: service active on ~/.local/bin/rog-control, python processes 0, rog-control processes 1, both keybinds and the launcher open/close the window, journal panics 0 |
-| E22 | fail | evidence/E22-docs-python.txt: only the last count fails (3, expected 0): the three user-approved spec files .evals.sha256, RD.md, evals.md were still uncommitted when the tester ran. awk, greps 3/8/4/2, py outside specs 0, history intact, target ignored, branch OK all pass. To be re-run after the spec files are committed |
+| E22 | pass | evidence/E22-docs-python.txt: re-run alone at HEAD 2f950b7 after the three approved spec files were committed: awk prints nothing, greps 3/8/4/2, py outside specs 0, history intact, target ignored, branch feat/rust-rewrite, last count 0 (the full round-4 run had counted 3 uncommitted spec files) |
 
 ## Round 4 notes
 Tester: super-agents:tester at HEAD 4352866 (round 4, full run, evals.md as re-approved incl. the E8 patched-Python reference). 21 of 22 pass; E22 failed only on its last count (uncommitted spec files).

@@ -1,16 +1,16 @@
-$ bash $T/e22.sh   (E22 check exactly as in evals.md, plus a listing of what the last count counted)
+$ cd /home/orneyfish/Projects/rog-control   # HEAD 2f950b7
+--- awk (outside rollback section) ---
+--- greps: cargo test / install.sh / pre-rust / 509d5e4 ---
 3
 8
 4
 2
+--- python files outside specs ---
 py outside specs: 0
 history intact
 target
 target ignored
 feat/rust-rewrite
-3
---- the lines counted by that last command:
- M specs/rust-rewrite/.evals.sha256
- M specs/rust-rewrite/RD.md
- M specs/rust-rewrite/evals.md
-rc=0
+0
+--- git status --porcelain (for visibility) ---
+ M specs/rust-rewrite/evidence/E22-docs-python.txt
