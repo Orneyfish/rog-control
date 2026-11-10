@@ -1,6 +1,6 @@
 # Rust rewrite of ROG Control, with a shell installer
 
-**Status:** building
+**Status:** done
 **Risk:** high
 
 ## Summary
