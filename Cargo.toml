@@ -1,0 +1,30 @@
+[package]
+name = "rog-control"
+version = "0.1.0"
+edition = "2021"
+description = "GTK4/libadwaita tray app for ASUS ROG laptop hardware control"
+license = "MIT"
+publish = false
+
+[lib]
+name = "rog_control"
+path = "src/lib.rs"
+
+[[bin]]
+name = "rog-control"
+path = "src/main.rs"
+
+# The ported scenario suite drives real GTK widgets, which must all live on one
+# thread, so it brings its own tiny libtest-style runner (see tests/e2e.rs).
+[[test]]
+name = "e2e"
+path = "tests/e2e.rs"
+harness = false
+
+[dependencies]
+gtk = { package = "gtk4", version = "0.9", features = ["v4_12"] }
+adw = { package = "libadwaita", version = "0.7", features = ["v1_5"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+
+[profile.release]
+opt-level = 2
