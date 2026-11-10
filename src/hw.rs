@@ -514,11 +514,35 @@ pub fn parse_led_mode_data(v: &glib::Variant) -> Option<AuraState> {
     })
 }
 
+type AuraHook = std::rc::Rc<dyn Fn() -> Option<AuraState>>;
+
+thread_local! {
+    static AURA_HOOK: std::cell::RefCell<Option<AuraHook>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Restores the previous aura hook when dropped.
+pub struct AuraGuard(Option<AuraHook>);
+
+impl Drop for AuraGuard {
+    fn drop(&mut self) {
+        AURA_HOOK.with(|h| *h.borrow_mut() = self.0.take());
+    }
+}
+
+/// Test seam (main thread only): while the guard lives, [`read_aura_state`] answers with `hook`
+/// instead of asking asusd, so a test does not depend on the keyboard of the machine it runs on.
+pub fn hook_aura_state(hook: impl Fn() -> Option<AuraState> + 'static) -> AuraGuard {
+    AuraGuard(AURA_HOOK.with(|h| h.borrow_mut().replace(std::rc::Rc::new(hook))))
+}
+
 /// Current keyboard RGB mode/colours/speed/direction, read straight from asusd's own D-Bus
 /// property rather than assumed from whatever this app last set, so the panel reflects reality
 /// even after a physical Fn-combo or an asusctl call made elsewhere. A quick property read with a
 /// 1 s cap, as the architecture allows for D-Bus `Get()` calls.
 pub fn read_aura_state() -> Option<AuraState> {
+    if let Some(hook) = AURA_HOOK.with(|h| h.borrow().clone()) {
+        return hook();
+    }
     let bus = gio::bus_get_sync(gio::BusType::System, gio::Cancellable::NONE).ok()?;
     let reply = bus
         .call_sync(

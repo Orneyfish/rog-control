@@ -152,7 +152,10 @@ impl LightingWindow {
 
     pub fn refresh(&self) {
         self.suppress.during(|| {
-            if let Some(state) = read_aura_state() {
+            // Edits still waiting out their debounce are not in asusd yet; syncing from asusd
+            // would replace them and do_apply() would send the old values.
+            let state = if self.apply_debouncer.is_pending() { None } else { read_aura_state() };
+            if let Some(state) = state {
                 if let Some(i) = aura_effect_names().iter().position(|e| *e == state.effect) {
                     self.effect_dropdown.set_selected(i as u32);
                 }

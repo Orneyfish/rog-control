@@ -44,6 +44,22 @@ pub fn blocked_commands() -> Vec<String> {
     BLOCKED.lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
+thread_local! {
+    static SKIPPED: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
+/// Marks the running test as skipped because a fixture it needs is absent on this machine. Use it
+/// as `return skip("why")`: the runner then reports the test as skipped, never as passed, so a
+/// missing fixture cannot masquerade as a green test.
+pub fn skip(reason: &str) {
+    SKIPPED.with(|s| *s.borrow_mut() = Some(reason.to_string()));
+}
+
+/// The skip reason of the test that just returned, if it skipped itself.
+pub fn take_skip() -> Option<String> {
+    SKIPPED.with(|s| s.borrow_mut().take())
+}
+
 /// Drain pending GLib main-loop work (debouncers, async probes) for `ms` milliseconds.
 pub fn pump(ms: u64) {
     let main_loop = glib::MainLoop::new(None, false);

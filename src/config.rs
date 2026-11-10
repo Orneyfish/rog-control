@@ -79,11 +79,34 @@ pub fn load() -> Value {
     load_from(&config_path())
 }
 
+/// A file that exists but is not a JSON object was read as defaults at startup (never rewritten
+/// there); the first save is about to replace it with those defaults plus one change, so keep the
+/// original beside it as `config.json.corrupt` first. An existing `.corrupt` is never overwritten.
+fn keep_unusable(path: &Path) {
+    let Ok(bytes) = std::fs::read(path) else { return };
+    // An empty file holds nothing to keep (and an empty `.corrupt` would block a real backup later).
+    if bytes.trim_ascii().is_empty() || matches!(serde_json::from_slice::<Value>(&bytes), Ok(Value::Object(_))) {
+        return;
+    }
+    let mut backup = path.as_os_str().to_owned();
+    backup.push(".corrupt");
+    let result = std::fs::OpenOptions::new().write(true).create_new(true).open(&backup).and_then(|mut f| {
+        f.write_all(&bytes)?;
+        f.sync_all()
+    });
+    match result {
+        Ok(()) => eprintln!("rog-control: {} is not valid; kept a copy as {}", path.display(), PathBuf::from(&backup).display()),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(e) => eprintln!("rog-control: could not keep a copy of the unreadable {}: {e}", path.display()),
+    }
+}
+
 /// Atomic: write `config.json.tmp`, then rename over the real file.
 pub fn save_to(path: &Path, cfg: &Value) -> std::io::Result<()> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
+    keep_unusable(path);
     let mut tmp = path.as_os_str().to_owned();
     tmp.push(".tmp");
     let tmp = PathBuf::from(tmp);

@@ -122,6 +122,12 @@ pattern floods the backend with concurrent calls that race — the root cause of
 two confirmed bugs (an RGB race where the last command to *finish*, not the last
 one picked, won; and a slider-drag flood that made `asusctl armoury set` calls
 hit the client-side timeout and surface as a spurious error toast).
+The flip side: a debounced control that `refresh()` also repopulates from hardware
+(the 2 s poll, a window being shown, a profile cycle, an async probe landing) must
+skip itself while `Debouncer::is_pending()` — hardware does not know the user's
+value yet, and the pending apply reads the widget, so syncing would send the old
+value instead. New debounced controls need that check and a test like
+`*_refresh_mid_debounce_*` in `tests/e2e/extra.rs`.
 
 **Hardware-read helpers return `None`/defaults rather than failing, and UI
 generally shows controls regardless, only surfacing failure on write.**
@@ -143,7 +149,9 @@ GPU-Optimized and Screen-Auto opt-in flags — and the last-set power limits
 (which have no hardware read-back). It lives at `$HOME/.config/rog-control/config.json`
 (derived from `$HOME`, so `HOME=<tmp>` isolates a run), is held as a plain JSON
 value so unknown keys survive a save, is saved atomically (`config.json.tmp`, then
-rename), and a missing or corrupt file gives defaults without being rewritten.
+rename), and a missing or corrupt file gives defaults without being rewritten at
+startup; the first save over an unparsable file keeps the original as
+`config.json.corrupt` (never overwriting an earlier one).
 Everything else (current profile, battery limit, fan curves, RGB state) is read
 live from asusctl/sysfs/asusd's D-Bus properties, never cached in config. This
 mirrors G-Helper's own automation model, which also has no single global
@@ -222,7 +230,10 @@ unreliable for verifying this app in its actual desktop environment, while this
 approach has caught every real regression so far. GTK widgets must all live on one
 thread, so the suite has its own tiny libtest-style runner (`harness = false`).
 `pump(ms)` drains pending GLib timeouts/idle callbacks (needed to let debouncers
-and async probes fire during a test).
+and async probes fire during a test). A test whose fixture is absent on the machine
+(`rules.lua`, the caelestia scheme, an hwmon sensor, `dbus-daemon`) must
+`return skip("why")`, never a bare `return`: the runner prints it as SKIPPED and
+counts it under `ignored`, so a missing fixture can't pass silently.
 
 The suite is the Rust port of the original scenario list (each test carries a
 `// ports: <Class>.<test_name>` comment naming the original) plus `guards:` tests for

@@ -204,7 +204,7 @@ fn open_log(env: &ChildEnv) -> std::fs::File {
 fn skip_without_dbus_daemon() -> bool {
     let missing = Command::new("dbus-daemon").arg("--version").stdout(Stdio::null()).stderr(Stdio::null()).status().is_err();
     if missing {
-        eprintln!("note: dbus-daemon not found, skipping the startup tests");
+        crate::common::skip("dbus-daemon not found; these tests need a private session bus");
     }
     missing
 }

@@ -89,7 +89,10 @@ fn exec(argv: &[String], timeout: Duration) -> io::Result<CmdOut> {
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .spawn()?;
+        .spawn()
+        // The bare OS error ("No such file or directory (os error 2)") never says which tool was
+        // missing, and this text becomes the toast the user reads.
+        .map_err(|e| io::Error::new(e.kind(), format!("{prog}: {e}")))?;
     let deadline = Instant::now() + timeout;
     let (tx, rx) = mpsc::channel::<(bool, Vec<u8>)>();
     // Detached readers: a tool that leaves a grandchild holding the pipe must not wedge us.
@@ -344,4 +347,17 @@ pub fn py_round(x: f64) -> i64 {
 /// First `n` characters (Python's `s[:n]`), safe on multi-byte text.
 pub fn truncate_chars(s: &str, n: usize) -> String {
     s.chars().take(n).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // guards: FR-23 - a tool that cannot be started is reported with its name (it becomes the toast text)
+    #[test]
+    fn spawn_failure_names_the_tool() {
+        let err = run_capture(&["rog-control-no-such-tool", "--flag"], Duration::from_secs(2)).expect_err("no such tool");
+        assert_eq!(err.kind(), io::ErrorKind::NotFound, "the error kind must survive");
+        assert!(err.to_string().starts_with("rog-control-no-such-tool: "), "tool name missing: {err}");
+    }
 }

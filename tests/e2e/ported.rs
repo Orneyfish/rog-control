@@ -138,14 +138,18 @@ fn sysfs_helpers__read_sysfs_int_non_numeric_returns_default() {
 
 // ports: TestHwmonResolution.test_cpu_temp_path_is_coretemp_not_hardcoded
 fn hwmon_resolution__cpu_temp_path_is_coretemp_not_hardcoded() {
-    let Some(path) = hwmon().cpu_temp.clone() else { return }; // no coretemp device: nothing to check
+    let Some(path) = hwmon().cpu_temp.clone() else { return skip("no coretemp hwmon device on this machine") };
     let dir = std::path::Path::new(&path).parent().expect("sensor dir").join("name");
     assert_eq!(read_sysfs(dir.to_str()).as_deref(), Some("coretemp"));
 }
 
 // ports: TestHwmonResolution.test_fan_paths_are_asus_driver
 fn hwmon_resolution__fan_paths_are_asus_driver() {
-    for path in [hwmon().cpu_fan.clone(), hwmon().gpu_fan.clone()].into_iter().flatten() {
+    let paths: Vec<_> = [hwmon().cpu_fan.clone(), hwmon().gpu_fan.clone()].into_iter().flatten().collect();
+    if paths.is_empty() {
+        return skip("no asus hwmon fan device on this machine");
+    }
+    for path in paths {
         let dir = std::path::Path::new(&path).parent().expect("sensor dir").join("name");
         assert_eq!(read_sysfs(dir.to_str()).as_deref(), Some("asus"), "{path}");
     }
@@ -154,7 +158,11 @@ fn hwmon_resolution__fan_paths_are_asus_driver() {
 // ports: TestHwmonResolution.test_resolved_sensors_actually_readable
 fn hwmon_resolution__resolved_sensors_actually_readable() {
     let hw = hwmon();
-    for path in [&hw.cpu_temp, &hw.cpu_fan, &hw.gpu_fan].into_iter().flatten() {
+    let paths: Vec<_> = [&hw.cpu_temp, &hw.cpu_fan, &hw.gpu_fan].into_iter().flatten().collect();
+    if paths.is_empty() {
+        return skip("no hwmon sensor resolved on this machine");
+    }
+    for path in paths {
         assert!(read_sysfs_int(Some(path)).is_some(), "{path} did not yield an int");
     }
 }
@@ -168,7 +176,7 @@ fn colour_helpers__hex_gdk_rgba_round_trip() {
 
 // ports: TestColourHelpers.test_theme_colours_match_live_scheme
 fn colour_helpers__theme_colours_match_live_scheme() {
-    let Ok(text) = std::fs::read_to_string(scheme_json_path()) else { return }; // no caelestia scheme here
+    let Ok(text) = std::fs::read_to_string(scheme_json_path()) else { return skip("caelestia scheme.json not present on this machine") };
     let data: serde_json::Value = serde_json::from_str(&text).expect("scheme.json parses");
     let live = |name: &str| data["colours"][name].as_str().expect("colour present").trim_start_matches('#').to_string();
     assert_eq!(theme_primary_hex(), live("primary"));
@@ -859,7 +867,7 @@ fn rules_text() -> Option<String> {
 
 // ports: TestHyprlandRulesSyntax.test_rules_file_parses_with_balanced_delimiters
 fn hyprland_rules__rules_file_parses_with_balanced_delimiters() {
-    let Some(text) = rules_text() else { return }; // rules.lua not present on this machine
+    let Some(text) = rules_text() else { return skip("rules.lua not present on this machine") };
     for (open, close) in [('(', ')'), ('{', '}')] {
         assert_eq!(text.matches(open).count(), text.matches(close).count(), "unbalanced {open}{close} in rules.lua");
     }
@@ -867,7 +875,7 @@ fn hyprland_rules__rules_file_parses_with_balanced_delimiters() {
 
 // ports: TestHyprlandRulesSyntax.test_main_window_and_companion_rules_present
 fn hyprland_rules__main_window_and_companion_rules_present() {
-    let Some(text) = rules_text() else { return };
+    let Some(text) = rules_text() else { return skip("rules.lua not present on this machine") };
     assert!(text.contains("title = \"^ROG Control$\""));
     assert!(text.contains("Fans and Power"));
 }

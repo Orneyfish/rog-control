@@ -8,7 +8,8 @@
 # Everything is relocatable for testing: PREFIX (default ~/.local) holds bin/rog-control,
 # XDG_DATA_HOME the launcher entry and icons, XDG_CONFIG_HOME the systemd user unit.
 # Nothing here edits Hyprland config; the keybinds are a one-time manual step (see CLAUDE.md).
-# Shortcut: PREFIX must not contain spaces (it is written unquoted into the unit and desktop entry).
+# PREFIX must not contain whitespace or any of  " ' \ % $ `  (it is written unquoted into the unit and
+# desktop entry, where they split or rewrite the command); the script refuses such a path up front.
 set -eu
 
 PREFIX=${PREFIX:-$HOME/.local}
@@ -44,6 +45,20 @@ if [ "$mode" = uninstall ]; then
   exit 0
 fi
 
+# The binary path goes into ExecStart= and Exec= unquoted: whitespace would split the command, and
+# quotes, backslashes, % and $ are expanded by systemd / the desktop entry parser. Refuse it now,
+# before anything is built or changed, instead of installing a service that cannot start.
+case $BIN in
+  *[[:space:]]*|*[\"\'\\%\$\`]*)
+    {
+      echo "install.sh: cannot install to '$BIN': PREFIX (or HOME) contains whitespace or one of the characters \" ' \\ % \$ \`"
+      echo "that systemd and desktop entries would read as syntax. Use a plain path, e.g.  PREFIX=\$HOME/.local ./install.sh"
+      echo "Nothing was installed."
+    } >&2
+    exit 2
+    ;;
+esac
+
 # Everything below runs from the checkout this script lives in.
 cd "$(dirname "$0")"
 
@@ -74,8 +89,8 @@ if ! cargo build --release --locked; then
 fi
 [ -x target/release/rog-control ] || { echo "install.sh: target/release/rog-control is missing after the build" >&2; exit 1; }
 
-tmpfiles=
-cleanup() { for f in $tmpfiles; do rm -f "$f"; done; }
+tmpfiles=()
+cleanup() { for f in ${tmpfiles[@]+"${tmpfiles[@]}"}; do rm -f "$f"; done; }
 trap cleanup EXIT
 
 # put <source> <dest> <mode>: copy beside the destination, then rename over it, so a running
@@ -83,7 +98,7 @@ trap cleanup EXIT
 put() {
   mkdir -p "$(dirname "$2")"
   tmp=$(mktemp "$2.XXXXXX")
-  tmpfiles="$tmpfiles $tmp"
+  tmpfiles+=("$tmp")
   install -m "$3" "$1" "$tmp"
   mv -f "$tmp" "$2"
 }
@@ -100,7 +115,7 @@ backup_if_different() {
 # put_generated <dest> <mode>: put for a file read from stdin.
 put_generated() {
   new=$(mktemp)
-  tmpfiles="$tmpfiles $new"
+  tmpfiles+=("$new")
   cat > "$new"
   backup_if_different "$new" "$1"
   put "$new" "$1" "$2"

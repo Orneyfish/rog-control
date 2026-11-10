@@ -36,17 +36,24 @@ fn main() {
 
     println!("\nrunning {} tests", selected.len());
     let started = Instant::now();
-    let (mut passed, mut failed) = (0, Vec::new());
+    let (mut passed, mut failed, mut skipped) = (0, Vec::new(), Vec::new());
     for (name, test) in &selected {
         use std::io::Write;
         print!("test {name} ... ");
         let _ = std::io::stdout().flush();
         match catch_unwind(AssertUnwindSafe(test)) {
-            Ok(()) => {
-                println!("ok");
-                passed += 1;
-            }
+            Ok(()) => match common::take_skip() {
+                Some(reason) => {
+                    println!("SKIPPED ({reason})");
+                    skipped.push(*name);
+                }
+                None => {
+                    println!("ok");
+                    passed += 1;
+                }
+            },
             Err(_) => {
+                common::take_skip();
                 println!("FAILED");
                 failed.push(*name);
             }
@@ -58,13 +65,20 @@ fn main() {
             println!("    {name}");
         }
     }
+    if !skipped.is_empty() {
+        println!("\nwarning: {} tests skipped because a fixture is missing on this machine (they did not run):", skipped.len());
+        for name in &skipped {
+            println!("    {name}");
+        }
+    }
     let blocked = common::blocked_commands();
     println!("\n({} write commands were swallowed by the fail-closed guard)", blocked.len());
     println!(
-        "\ntest result: {}. {} passed; {} failed; 0 ignored; 0 measured; {} filtered out; finished in {:.2}s\n",
+        "\ntest result: {}. {} passed; {} failed; {} ignored; 0 measured; {} filtered out; finished in {:.2}s\n",
         if failed.is_empty() { "ok" } else { "FAILED" },
         passed,
         failed.len(),
+        skipped.len(),
         0,
         started.elapsed().as_secs_f64()
     );

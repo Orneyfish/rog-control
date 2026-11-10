@@ -188,6 +188,13 @@ impl Debouncer {
         *self.callback.borrow_mut() = Some(Rc::new(callback));
     }
 
+    /// True between a change and its command: the widget then holds a value the user chose that
+    /// hardware does not know yet, so a refresh must not overwrite it from hardware (the command
+    /// would read the stale value back and send that instead).
+    pub fn is_pending(&self) -> bool {
+        self.source.borrow().is_some()
+    }
+
     pub fn trigger(&self) {
         if let Some(id) = self.source.borrow_mut().take() {
             id.remove();

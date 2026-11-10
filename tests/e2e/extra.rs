@@ -16,9 +16,10 @@ use rog_control::tray::TrayHandlers;
 use rog_control::extra::ExtraWindow;
 use rog_control::fans::{FanCurveEditor, FansPowerWindow, DEFAULT_CURVE};
 use rog_control::hw::*;
+use rog_control::lighting::LightingWindow;
 use rog_control::panels::*;
 use rog_control::sys::{clear_tool_overrides, hook_sysfs, override_tool, push_capture_hook, run_cmd, CmdOut, SysfsGuard};
-use rog_control::theme::theme_primary_hex;
+use rog_control::theme::{hex_to_gdk_rgba, theme_primary_hex};
 use rog_control::widgets::ConfirmFn;
 use serde_json::json;
 
@@ -44,10 +45,16 @@ pub fn tests() -> Vec<(&'static str, fn())> {
         tray__scroll_always_cycles_forward,
         config__save_is_atomic_and_keeps_unknown_keys,
         config__corrupt_missing_and_misshapen_files_give_defaults,
+        config__first_save_keeps_a_copy_of_an_unusable_file,
+        install__refuses_a_prefix_that_would_corrupt_the_unit,
         startup_panel__switch_runs_enable_and_disable,
         keyboard_panel__level_buttons_send_leds_set_and_are_remembered_per_power_source,
         performance_panel__profile_buttons_apply_pair_and_remember,
         battery_panel__limit_is_debounced_and_oneshot_command,
+        battery_panel__refresh_mid_debounce_keeps_the_users_limit,
+        keyboard_panel__refresh_mid_debounce_keeps_the_users_edit,
+        lighting_window__refresh_mid_debounce_keeps_the_users_edit,
+        fans_window__refresh_mid_debounce_keeps_every_slider_value,
         screen_panel__presets_apply_and_auto_only_remembers,
         extra_window__controls_send_armoury_commands_and_failures_toast,
         fans_window__failed_write_toasts_and_power_mode_pairs_with_ppd,
@@ -441,6 +448,194 @@ fn battery_panel__limit_is_debounced_and_oneshot_command() {
     assert_eq!(*calls.borrow(), vec![strings(&["asusctl", "battery", "limit", "60"])]);
     panel.oneshot_button.emit_clicked();
     assert_eq!(calls.borrow().last(), Some(&strings(&["asusctl", "battery", "oneshot"])));
+}
+
+// guards: FR-27 - the 2 s poll's refresh() must not overwrite a limit that is still waiting out its debounce
+fn battery_panel__refresh_mid_debounce_keeps_the_users_limit() {
+    let _s = sysfs_map(&[(BATTERY_LIMIT_PATH, "80")]);
+    let (calls, _g) = record_run_cmd();
+    let panel = BatteryPanel::new(no_toast());
+    assert_eq!(panel.scale.value(), 80.0);
+    panel.scale.set_value(60.0);
+    pump(60);
+    panel.refresh(); // the poll lands inside the 150 ms quiet period; hardware still says 80
+    assert_eq!(panel.scale.value(), 60.0, "the poll replaced the user's value with the stale hardware one");
+    assert_eq!(panel.header.title.label(), "Battery Charge Limit: 60%");
+    pump(400);
+    assert_eq!(*calls.borrow(), vec![strings(&["asusctl", "battery", "limit", "60"])], "the stale limit was sent");
+    panel.refresh(); // nothing pending any more: hardware is the truth again
+    assert_eq!(panel.scale.value(), 80.0, "refresh stayed disabled after the debounce fired");
+}
+
+fn effect_index(name: &str) -> u32 {
+    aura_effect_names().iter().position(|e| *e == name).expect("known effect") as u32
+}
+
+/// What asusd "reports" in these tests, so a refresh that reverts to it is detectable whatever
+/// keyboard the machine has: a static red effect at low speed.
+fn asusd_says_static_red() -> rog_control::hw::AuraGuard {
+    hook_aura_state(|| {
+        Some(AuraState { effect: "static".into(), colour1: "ff0000".into(), colour2: "00ff00".into(), speed: "low".into(), direction: "left".into() })
+    })
+}
+
+fn aura_effect_cmds(calls: &Calls) -> Vec<Vec<String>> {
+    calls.borrow().iter().filter(|c| c.starts_with(&strings(&["asusctl", "aura", "effect"]))).cloned().collect()
+}
+
+// guards: FR-27 - a refresh (window shown, profile cycled, power source changed) must not revert an effect still waiting out its debounce
+fn keyboard_panel__refresh_mid_debounce_keeps_the_users_edit() {
+    let _a = asusd_says_static_red();
+    let (calls, _g) = record_run_cmd();
+    let panel = KeyboardPanel::new(no_toast(), make_cfg(), no_save(), on_ac(), Rc::new(|| {}));
+    pump(50);
+    assert_eq!(panel.effect_dropdown.selected(), effect_index("static"));
+    let mine = "breathe";
+    panel.effect_dropdown.set_selected(effect_index(mine));
+    panel.colour_btn.set_rgba(&hex_to_gdk_rgba("112233"));
+    pump(60);
+    panel.refresh();
+    assert_eq!(panel.effect_dropdown.selected(), effect_index(mine), "the refresh reverted the effect to asusd's");
+    pump(400);
+    let sent = aura_effect_cmds(&calls);
+    assert_eq!(sent.len(), 1, "{sent:?}");
+    assert_eq!(sent[0][3], mine, "the old effect was sent: {:?}", sent[0]);
+    assert!(sent[0].iter().any(|a| a == "112233"), "the picked colour was lost: {:?}", sent[0]);
+    panel.refresh(); // nothing pending any more: asusd is the truth again
+    assert_eq!(panel.effect_dropdown.selected(), effect_index("static"), "refresh stayed disabled after the debounce fired");
+}
+
+// guards: FR-27 - same for the Lighting window: refresh() must keep edits that have not been sent yet
+fn lighting_window__refresh_mid_debounce_keeps_the_users_edit() {
+    let _a = asusd_says_static_red();
+    let (calls, _g) = record_run_cmd();
+    let win = LightingWindow::new(None, no_toast(), None);
+    pump(50);
+    assert_eq!(win.effect_dropdown.selected(), effect_index("static"));
+    let mine = "breathe";
+    win.effect_dropdown.set_selected(effect_index(mine));
+    win.speed_dropdown.set_selected(2); // "high"; asusd says "low"
+    win.colour1_btn.set_rgba(&hex_to_gdk_rgba("112233"));
+    pump(60);
+    win.refresh();
+    assert_eq!(win.effect_dropdown.selected(), effect_index(mine), "the refresh reverted the effect to asusd's");
+    assert_eq!(win.speed_dropdown.selected(), 2, "the refresh reverted the speed to asusd's");
+    pump(400);
+    let sent = aura_effect_cmds(&calls);
+    assert_eq!(sent.len(), 1, "{sent:?}");
+    for needle in [mine, "112233", "high"] {
+        assert!(sent[0].iter().any(|a| a == needle), "{needle} missing from {:?}", sent[0]);
+    }
+    win.refresh(); // nothing pending any more: asusd is the truth again
+    assert_eq!(win.effect_dropdown.selected(), effect_index("static"), "refresh stayed disabled after the debounce fired");
+}
+
+// guards: FR-27 - every slider of Fans and Power (synced by refresh() and by the async NVIDIA probe) keeps a value still waiting out its debounce
+fn fans_window__refresh_mid_debounce_keeps_every_slider_value() {
+    let sample = "Current Power Limit : 150.00 W\nMin Power Limit : 100.00 W\nMax Power Limit : 175.00 W\n";
+    let _c = fake_capture(move |argv| match argv.join(" ").as_str() {
+        "nvidia-smi -q -d POWER" => Some(ok_out(sample)),
+        a if a.starts_with("nvidia-settings -q ") => Some(ok_out("")),
+        _ => None,
+    });
+    override_tool("nvidia-settings", true);
+    let _s = sysfs_map(&[(PPT_PL1_PATH, "40"), (PPT_PL2_PATH, "60"), (NV_BOOST_PATH, "5"), (NV_TEMP_TARGET_PATH, "80")]);
+    let (_calls, _g) = record_run_cmd();
+    let cfg = make_cfg();
+    let win = FansPowerWindow::new(None, no_toast(), cfg.clone(), no_save());
+    pump(300); // the probe lands: later refreshes apply its state at once
+    let sliders = [
+        ("pl1", &win.pl1, 70.0),
+        ("pl2", &win.pl2, 100.0),
+        ("boost", &win.boost, 15.0),
+        ("temp_target", &win.temp_target, 90.0),
+        ("core_clock", &win.core_clock, 120.0),
+        ("mem_clock", &win.mem_clock, 400.0),
+        ("gpu_power", &win.gpu_power, 120.0),
+    ];
+    for (_, slider, value) in &sliders {
+        slider.scale.set_value(*value);
+    }
+    pump(60);
+    win.refresh(); // inside every slider's quiet period
+    for (key, slider, value) in &sliders {
+        assert_eq!(slider.scale.value(), *value, "refresh() replaced the user's {key} value");
+    }
+    pump(400);
+    for (key, _, value) in &sliders {
+        assert_eq!(cfg.borrow()["power_limits"][*key].as_f64(), Some(*value), "the stale {key} value was applied");
+    }
+    win.refresh(); // nothing pending any more: hardware is the truth again
+    assert_eq!(win.pl1.scale.value(), 40.0, "refresh stayed disabled after the debounce fired");
+    clear_tool_overrides();
+}
+
+// guards: FR-29 - the first save over an unusable file keeps the original as config.json.corrupt, once
+fn config__first_save_keeps_a_copy_of_an_unusable_file() {
+    let tmp = TempDir::new("cfgkeep");
+    let path = tmp.0.join("config.json");
+    let backup = tmp.0.join("config.json.corrupt");
+    let read = |p: &std::path::Path| std::fs::read(p).expect("read");
+
+    std::fs::write(&path, "{not json").expect("seed");
+    let mut cfg = config::load_from(&path);
+    assert!(!backup.exists(), "loading must not create anything");
+    assert_eq!(read(&path), b"{not json", "loading must not rewrite the file");
+    cfg["automation"]["profile_ac"] = json!("Balanced");
+    config::save_to(&path, &cfg).expect("save");
+    assert_eq!(read(&backup), b"{not json", "the user's original file was not kept");
+    assert_eq!(config::load_from(&path)["automation"]["profile_ac"], json!("Balanced"));
+
+    // A later unusable file never replaces the first copy, and a healthy file never makes one.
+    std::fs::write(&path, "[1, 2]").expect("seed again");
+    config::save_to(&path, &cfg).expect("save");
+    assert_eq!(read(&backup), b"{not json", "an existing .corrupt was overwritten");
+    let healthy = TempDir::new("cfgkeep2");
+    let hpath = healthy.0.join("config.json");
+    std::fs::write(&hpath, r#"{"automation": {"gpu_optimized": true}}"#).expect("seed");
+    config::save_to(&hpath, &config::load_from(&hpath)).expect("save");
+    std::fs::write(&hpath, "   \n").expect("empty file");
+    config::save_to(&hpath, &cfg).expect("save");
+    assert!(!healthy.0.join("config.json.corrupt").exists(), "a copy was made of a file with nothing in it");
+}
+
+// guards: FR-31 - a PREFIX/HOME that systemd would misread is refused before anything is built or written
+fn install__refuses_a_prefix_that_would_corrupt_the_unit() {
+    use std::os::unix::fs::PermissionsExt;
+    use std::process::Command;
+    let root = TempDir::new("install");
+    let fakebin = root.0.join("fakebin");
+    std::fs::create_dir_all(&fakebin).expect("fakebin");
+    let ran = root.0.join("cargo-ran");
+    // A cargo that only records it was called and fails: even a broken check cannot build or install here.
+    let cargo = fakebin.join("cargo");
+    std::fs::write(&cargo, format!("#!/bin/sh\ntouch '{}'\nexit 1\n", ran.display())).expect("fake cargo");
+    std::fs::set_permissions(&cargo, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+    let path = format!("{}:{}", fakebin.display(), std::env::var("PATH").unwrap_or_default());
+    let script = concat!(env!("CARGO_MANIFEST_DIR"), "/install.sh");
+    let run = |var: &str, value: &str| {
+        let home = root.0.join("home");
+        let mut cmd = Command::new("bash");
+        cmd.arg(script).arg("--no-enable").env_clear().env("PATH", &path).env("HOME", &home);
+        match var {
+            "HOME" => cmd.env("HOME", root.0.join(value)),
+            _ => cmd.env("PREFIX", root.0.join(value)),
+        };
+        let out = cmd.output().expect("run install.sh");
+        (out.status.code(), String::from_utf8_lossy(&out.stderr).into_owned())
+    };
+    let nothing_written = || !root.0.join("home").exists() && !ran.exists();
+
+    for (var, value) in [("PREFIX", "pre fix"), ("PREFIX", "50%off"), ("PREFIX", "q\"uote"), ("PREFIX", "back\\slash"), ("PREFIX", "dollar$x"), ("HOME", "my home")] {
+        let (code, err) = run(var, value);
+        assert_eq!(code, Some(2), "{var}={value:?} was not refused: {err}");
+        assert!(err.contains("cannot install") && err.contains("PREFIX"), "{var}={value:?}: the message does not name the problem: {err}");
+        assert!(nothing_written(), "{var}={value:?}: files were written or the build started");
+    }
+    // Control: a plain path passes the check and goes on to the build (our fake cargo fails it).
+    let (code, err) = run("PREFIX", "plain");
+    assert_eq!(code, Some(1), "a plain PREFIX was refused: {err}");
+    assert!(ran.exists(), "a plain PREFIX never reached the build: {err}");
 }
 
 fn monitor_fake(refresh: f64) -> rog_control::sys::CaptureGuard {

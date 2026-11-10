@@ -526,6 +526,12 @@ impl KeyboardPanel {
             if let Some((_, btn)) = self.buttons.iter().find(|(l, _)| *l == level) {
                 btn.set_active(true);
             }
+            // An effect/colour picked a moment ago is still waiting out its debounce; asusd does
+            // not know it yet, so syncing from asusd would replace it and apply_effect() would
+            // send the old one.
+            if self.apply_debouncer.is_pending() {
+                return;
+            }
             // Reflect whatever is actually active on the keyboard; colours fall back to the
             // desktop's Material You palette only when asusd has no state to report at all.
             let state = read_aura_state();
@@ -664,9 +670,13 @@ impl BatteryPanel {
 
     pub fn refresh(&self) {
         self.suppress.during(|| {
-            let limit = read_sysfs_int(Some(BATTERY_LIMIT_PATH)).unwrap_or(100);
-            self.scale.set_value(limit as f64);
-            self.header.title.set_label(&format!("Battery Charge Limit: {limit}%"));
+            // A limit picked a moment ago is still waiting out its debounce: hardware still says
+            // the old value, and writing that back would make apply_limit() send it.
+            if !self.limit_debouncer.is_pending() {
+                let limit = read_sysfs_int(Some(BATTERY_LIMIT_PATH)).unwrap_or(100);
+                self.scale.set_value(limit as f64);
+                self.header.title.set_label(&format!("Battery Charge Limit: {limit}%"));
+            }
             self.header.stat.set_label(&battery_charging_text());
             self.show_limit_label();
         });

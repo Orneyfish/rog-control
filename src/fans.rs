@@ -819,7 +819,12 @@ impl FansPowerWindow {
     /// Prefers the real hardware reading; when there is none (firmware reports the attribute
     /// unavailable) falls back to what the user last set, since this window is rebuilt fresh on
     /// every open and would otherwise always reset.
-    fn sync_slider(&self, slider: &LabeledSlider, sysfs_path: &str, cfg_key: &str) {
+    fn sync_slider(&self, slider: &LabeledSlider, debouncer: usize, sysfs_path: &str, cfg_key: &str) {
+        // A value picked a moment ago is still waiting out its debounce: syncing would replace it
+        // and the pending apply would send the old value.
+        if self.debouncers[debouncer].is_pending() {
+            return;
+        }
         if let Some(v) = read_sysfs_int(Some(sysfs_path)) {
             slider.scale.set_value(v as f64);
         } else if let Some(v) = config::get_f64(&self.cfg, "power_limits", cfg_key) {
@@ -830,10 +835,10 @@ impl FansPowerWindow {
     /// Only fast sysfs reads happen here; everything that shells out runs in the background.
     pub fn refresh_power_limits(self: &Rc<Self>) {
         self.suppress.during(|| {
-            self.sync_slider(&self.pl1, PPT_PL1_PATH, "pl1");
-            self.sync_slider(&self.pl2, PPT_PL2_PATH, "pl2");
-            self.sync_slider(&self.boost, NV_BOOST_PATH, "boost");
-            self.sync_slider(&self.temp_target, NV_TEMP_TARGET_PATH, "temp_target");
+            self.sync_slider(&self.pl1, D_PL1, PPT_PL1_PATH, "pl1");
+            self.sync_slider(&self.pl2, D_PL2, PPT_PL2_PATH, "pl2");
+            self.sync_slider(&self.boost, D_BOOST, NV_BOOST_PATH, "boost");
+            self.sync_slider(&self.temp_target, D_TEMP, NV_TEMP_TARGET_PATH, "temp_target");
             self.apply_limits_switch.set_active(config::get_bool(&self.cfg, "power_limits", "apply_limits"));
         });
         self.refresh_power_mode_async();
@@ -896,14 +901,23 @@ impl FansPowerWindow {
         self.suppress.during(|| {
             // nvidia-settings cannot even read these back on this session, so fall back to what
             // the user last set instead of a hard-coded 0.
+            // The probe lands asynchronously, so the user may already be dragging: a slider whose
+            // change is still waiting out its debounce keeps the value they picked.
+            let idle = |idx: usize| !self.debouncers[idx].is_pending();
             let saved = |key: &str| config::get_f64(&self.cfg, "power_limits", key).filter(|v| *v != 0.0).unwrap_or(0.0);
-            self.core_clock.scale.set_value(saved("core_clock"));
-            self.mem_clock.scale.set_value(saved("mem_clock"));
-            if let Some((cur, lo, hi)) = probe.power_bounds {
+            if idle(D_CORE) {
+                self.core_clock.scale.set_value(saved("core_clock"));
+            }
+            if idle(D_MEM) {
+                self.mem_clock.scale.set_value(saved("mem_clock"));
+            }
+            if let Some((_, lo, hi)) = probe.power_bounds {
                 self.gpu_power.scale.set_range(lo, hi);
-                self.gpu_power.scale.set_value(cur);
-            } else if let Some(v) = config::get_f64(&self.cfg, "power_limits", "gpu_power") {
-                self.gpu_power.scale.set_value(v);
+            }
+            if idle(D_GPU_POWER) {
+                if let Some(v) = probe.power_bounds.map(|b| b.0).or_else(|| config::get_f64(&self.cfg, "power_limits", "gpu_power")) {
+                    self.gpu_power.scale.set_value(v);
+                }
             }
             self.gpu_unsupported_notice.set_visible(!(probe.clock_ok || probe.power_ok));
         });
