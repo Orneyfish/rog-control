@@ -1,0 +1,17 @@
+$ bash $T/e19.sh   (verbatim from evals.md E19; run on the live Hyprland session, real HOME)
+1
+1
+108
+0
+101:hl.bind("XF86Launch1", hl.dsp.exec_cmd("/home/orneyfish/.local/bin/rog-control --open"),
+103:hl.bind("CTRL + SHIFT + F12", hl.dsp.exec_cmd("/home/orneyfish/.local/bin/rog-control --open"),
+105:hl.bind("CTRL + SHIFT + F5", hl.dsp.exec_cmd("/home/orneyfish/.local/bin/rog-control --cycle-profile"),
+107:hl.bind("CTRL + SHIFT + ALT + F5", hl.dsp.exec_cmd("/home/orneyfish/.local/bin/rog-control --cycle-profile-back"),
+/home/orneyfish/.local/bin/rog-control --open
+/home/orneyfish/.local/bin/rog-control --open
+/home/orneyfish/.local/bin/rog-control --cycle-profile
+/home/orneyfish/.local/bin/rog-control --cycle-profile-back
+bound binary exists
+lua parses
+ok
+config errors: []

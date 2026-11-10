@@ -1,0 +1,27 @@
+$ bash $T/e14.sh   (verbatim from evals.md E14; src=$T/src copy of tracked files, HI=$T/inst, fake systemctl)
+==> building (cargo build --release --locked)
+    Finished `release` profile [optimized] target(s) in 30.53s
+==> installing the binary to $T/inst/.local/bin/rog-control
+==> installing icons under $T/inst/.local/share/icons/hicolor
+==> writing $T/inst/.config/systemd/user/rog-control.service
+==> writing $T/inst/.local/share/applications/com.orneyfish.RogControl.desktop
+==> reloading systemd and (re)starting rog-control.service
+==> done
+install rc=0
+1
+unit identical except ExecStart
+ExecStart=$T/inst/.local/bin/rog-control
+expect: ExecStart=$T/inst/.local/bin/rog-control
+desktop identical except Exec
+Exec=$T/inst/.local/bin/rog-control
+expect: Exec=$T/inst/.local/bin/rog-control
+python/checkout references: $T/inst/.config/systemd/user/rog-control.service:0 $T/inst/.local/share/applications/com.orneyfish.RogControl.desktop:0 
+desktop valid
+$T/inst/.local/share/icons/hicolor/scalable/apps/com.orneyfish.RogControl.svg
+$T/inst/.local/share/icons/hicolor/scalable/status/rog-control-symbolic.svg
+--- systemctl calls
+systemctl --user daemon-reload
+systemctl --user enable rog-control.service
+systemctl --user restart rog-control.service
+    Finished `release` profile [optimized] target(s) in 0.03s
+with --no-enable, systemctl calls: 0

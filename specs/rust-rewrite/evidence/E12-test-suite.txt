@@ -1,0 +1,18 @@
+$ E12 check, run from repo root (HOME=$H PATH=$FAKE:$PATH cargo test --locked)
+python tests: 67   ported: 67
+names identical
+--- cargo test result lines:
+     Running unittests src/lib.rs (target/debug/deps/rog_control-c0ca6eb106630b66)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/main.rs (target/debug/deps/rog_control-2154af53ad5bc0b4)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/e2e.rs (target/debug/deps/e2e-d660e107e626ebb3)
+test result: ok. 98 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 14.70s
+   Doc-tests rog_control
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+sum of passed = 98 (>= 67); 0 failed; 0 ignored; '#[ignore]' occurrences in src/ tests/: 0; trivially empty tests: none (smallest ported test body is 5 lines with asserts)
+non-read tool calls during tests:
+(empty list above; 57 read-only calls logged)
+/home/orneyfish/.config/rog-control/config.json: OK
+movewindowpixel count: 0
+test-run footer: '(7 write commands were swallowed by the fail-closed guard)'

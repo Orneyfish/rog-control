@@ -1,0 +1,15 @@
+$ timeout 180 dbus-run-session -- bash $T/e9.sh   (verbatim from evals.md E9; exit 143 is the script ending in wait on the killed app)
+rc=1 [OpenWindow s ''] Call failed: unknown window ''
+rc=1 [OpenWindow s nonsense] Call failed: unknown window 'nonsense'
+rc=1 [OpenWindow s ../../etc/passwd] Call failed: unknown window '../../etc/passwd'
+rc=1 [OpenWindow s xxxxxxxxxxxxxxxxx] Call failed: unknown window 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'
+rc=1 [OpenWindow i 7] Call failed: Type of message, “(i)”, does not match expected type “(s)”
+rc=1 [NoSuchMethod] Call failed: No such method “NoSuchMethod”
+rc=1 [OpenWindow] Call failed: Type of message, “()”, does not match expected type “(s)”
+profile writes logged: 20
+alive after 50 Open calls
+panics: 0
+/bin/sh: line 1: kill: (999234) - No such process
+--- app stderr (private-bus a11y noise only):
+
+(rog-control:999154): Gtk-CRITICAL **: 12:16:56.118: Unable to register the application: GDBus.Error:org.freedesktop.DBus.Error.NameHasNoOwner: Could not activate remote peer 'org.a11y.atspi.Registry': unit failed

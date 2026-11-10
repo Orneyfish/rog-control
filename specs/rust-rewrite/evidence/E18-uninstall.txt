@@ -1,0 +1,14 @@
+$ bash $T/e18.sh   (verbatim from evals.md E18; reuses HI=$T/inst2)
+==> stopping and disabling rog-control.service
+==> removing installed files (config and *.pre-rust backups are kept)
+uninstall rc=0
+--- systemctl
+systemctl --user disable --now rog-control.service
+systemctl --user daemon-reload
+--- left behind
+$T/inst2/.config/systemd/user/rog-control.service.pre-rust
+$T/inst2/.local/share/applications/com.orneyfish.RogControl.desktop.pre-rust
+user data and unrelated files untouched
+==> stopping and disabling rog-control.service
+==> removing installed files (config and *.pre-rust backups are kept)
+second uninstall rc=0

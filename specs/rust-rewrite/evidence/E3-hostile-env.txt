@@ -1,0 +1,14 @@
+$ timeout 180 dbus-run-session -- bash $T/e3.sh   (verbatim from evals.md E3)
+a) up with corrupt config
+a) config untouched
+b) window shown with no tools
+b) still alive
+c) answers while tools hang
+c) window within 2s
+c) answers with window open
+panics: 0
+/bin/sh: line 1: kill: (994403) - No such process
+--- stderr bytes: a=0 b=215 c=215
+--- b/c stderr content (private-bus a11y noise only, not a panic):
+
+(rog-control:994622): Gtk-CRITICAL **: 12:13:19.987: Unable to register the application: GDBus.Error:org.freedesktop.DBus.Error.NameHasNoOwner: Could not activate remote peer 'org.a11y.atspi.Registry': unit failed

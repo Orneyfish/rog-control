@@ -1,0 +1,22 @@
+$ bash $T/e21.sh   (verbatim from evals.md E21; real service, real session bus, real HOME)
+active
+/home/orneyfish/.local/bin/rog-control
+python processes: 0   rog-control processes: 1
+XF86Launch1: opens
+XF86Launch1: closes
+CTRL + SHIFT + F12: opens
+CTRL + SHIFT + F12: closes
+launcher entry: opens
+panics in journal: 0
+--- after the script (the eval's last wait_win prints nothing; checked by hand):
+ROG Control windows now: 0   rog-control processes: 1
+● rog-control.service - ROG Control tray (ASUS performance profile, battery, fans, RGB)
+     Loaded: loaded (/home/orneyfish/.config/systemd/user/rog-control.service; enabled; preset: enabled)
+     Active: active (running) since Tue 2026-11-10 12:30:52 IST; 13s ago
+ Invocation: 5eb7fb6086ab4f1d809132be4451345b
+   Main PID: 1046944 (rog-control)
+      Tasks: 18 (limit: 37825)
+     Memory: 57.8M (peak: 83.1M)
+        CPU: 1.248s
+--- hw snapshot after the service start vs hw.before (taken at start of run):
+identical (refresh rate back to 240 via the service's startup automation)

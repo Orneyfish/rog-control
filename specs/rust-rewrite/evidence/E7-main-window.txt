@@ -1,0 +1,12 @@
+$ (E7 script, real session bus, HOME=real, fake tools first on PATH)
+reference geometry:
+shot ROG Control 494 913 1033 264
+shot Fans and Power 560 760 40 340
+shot Keyboard Lighting 380 480 40 480
+shot Extra 453 320 40 560
+size: 494 913 vs 494 913 -> size-ok
+imgsame rust vs live python capture: 0.0010 0.0017 -> look-ok (limits 0.015 0.02)
+control (python main vs python Extra): rejected -> 'control ok'
+stderr offenders: 0 (e7.err is 0 bytes)
+extra: imgsame vs committed specs/rust-rewrite/ref/ROG_Control.png: 0.0014 0.0062
+screenshots: E7-main-window-rust.png, E7-main-window-python-ref-live.png, E7-side-by-side-*.png

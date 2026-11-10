@@ -1,0 +1,13 @@
+$ timeout 180 dbus-run-session -- bash $T/e5.sh   (verbatim from evals.md E5)
+launch 1 rc=0 in 22 ms
+launch 2 rc=0 in 1249 ms
+launch 3 rc=0 in 20 ms
+launch 4 rc=0 in 20 ms
+launch 5 rc=0 in 17 ms
+launch 6 rc=0 in 20 ms
+launch 7 rc=0 in 19 ms
+launch 8 rc=0 in 19 ms
+processes: 1
+first instance alive
+still answers
+/bin/sh: line 1: kill: (996286) - No such process

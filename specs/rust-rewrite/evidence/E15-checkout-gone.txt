@@ -1,0 +1,13 @@
+$ timeout 180 dbus-run-session -- bash $T/e15.sh   (verbatim from evals.md E15; first line mv $src $T/src.gone, then run installed binary with HOME=$HI)
+up
+IconThemePath=$T/inst/.local/share/icons
+tray icon file found
+inside the install prefix
+window opens
+
+(/usr/lib/xdg-desktop-portal:1042043): xdg-desktop-portal-WARNING **: 12:29:21.832: Failed to close session implementation: The connection is closed
+/bin/sh: line 1: kill: (1042120) - No such process
+--- checkout copy is gone: $T/src exists? no
+--- app stderr: private-bus a11y noise only
+
+(rog-control:1042032): Gtk-CRITICAL **: 12:29:21.825: Unable to register the application: GDBus.Error:org.freedesktop.DBus.Error.NameHasNoOwner: Could not activate remote peer 'org.a11y.atspi.Registry': unit failed

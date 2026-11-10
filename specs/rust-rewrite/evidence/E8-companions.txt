@@ -1,0 +1,36 @@
+$ (E8 script from evals.md, run in E7 shell state: real session bus, real HOME, fake tools first on PATH, service started as in E7 lines 1-3)
+Fans and Power windows after second open: 1
+560 760 vs 560 760
+0.0000 0.0000
+Fans and Power look-ok
+Fans and Power at x=40 y=340   reference: shot Fans and Power 560 760 40 340
+Fans and Power closed
+service alive
+Keyboard Lighting windows after second open: 1
+380 480 vs 380 480
+0.0000 0.0000
+Keyboard Lighting look-ok
+Keyboard Lighting at x=40 y=480   reference: shot Keyboard Lighting 380 480 40 480
+Keyboard Lighting closed
+service alive
+Extra windows after second open: 1
+453 320 vs 453 320
+0.0000 0.0000
+Extra look-ok
+Extra at x=40 y=560   reference: shot Extra 453 320 40 560
+Extra closed
+service alive
+main close hides, service alive
+main reopens
+0.0000 0.0000
+reopened fans look-ok
+--- reference geometry:
+shot ROG Control 494 913 1033 264
+shot Fans and Power 560 760 40 340
+shot Keyboard Lighting 380 480 40 480
+shot Extra 453 320 40 560
+--- exact pixel compare (magick compare -metric AE) rust vs python capture: Fans 0, Lighting 0, Extra 0; sha256 identical:
+93f5e5c5f9f5d9cb 93f5e5c5f9f5d9cb Fans_and_Power
+e61739149e68e0eb e61739149e68e0eb Keyboard_Lighting
+556d1ecc72d00ac2 556d1ecc72d00ac2 Extra
+--- e8.err bytes: 183

@@ -1,0 +1,17 @@
+$ timeout 180 dbus-run-session -- bash $T/e6.sh   (verbatim from evals.md E6)
+registered: :1.3/StatusNotifierItem
+s "rog-control"
+s "ROG Control"
+s "Hardware"
+s "Active"
+s "rog-control-symbolic"
+b false
+activate: shown
+activate: hidden
+scroll:
+asusctl profile set Quiet
+secondary activate: app exited
+/bin/sh: line 1: kill: (996816) - No such process
+--- app stderr: private-bus a11y noise only
+
+(rog-control:996736): Gtk-CRITICAL **: 12:14:23.169: Unable to register the application: GDBus.Error:org.freedesktop.DBus.Error.NameHasNoOwner: Could not activate remote peer 'org.a11y.atspi.Registry': unit failed

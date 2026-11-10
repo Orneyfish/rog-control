@@ -1,0 +1,23 @@
+$ timeout 180 dbus-run-session -- bash $T/e11.sh   (verbatim from evals.md E11; Python reference = git worktree 509d5e4)
+--- python
+asusctl armoury set panel_overdrive 1
+asusctl leds set high
+asusctl profile set Performance
+hyprctl eval hl.monitor({output = "eDP-1", mode = "2560x1440@240", position = "0x0", scale = 1})
+hyprctl monitors -j
+powerprofilesctl set performance
+--- rust
+asusctl armoury set panel_overdrive 1
+asusctl leds set high
+asusctl profile set Performance
+hyprctl eval hl.monitor({output = "eDP-1", mode = "2560x1440@240", position = "0x0", scale = 1})
+hyprctl monitors -j
+powerprofilesctl set performance
+--- diff
+identical
+writes: 5
+config untouched
+/bin/sh: line 1: kill: (1001053) - No such process
+--- notify-send/systemctl-reboot lines: py=0 rust=0
+--- stderr bytes: py=0 rust=0
+--- power_supply online flags (all supplies): 1 0  (first = AC, 1 = on AC)

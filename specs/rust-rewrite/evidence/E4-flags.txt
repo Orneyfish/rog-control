@@ -1,0 +1,19 @@
+$ timeout 180 dbus-run-session -- bash $T/e4.sh   (verbatim from evals.md E4)
+no service: rc=0 in 0s msg=[ROG Control service not reachable: GDBus.Error:org.freedesktop.DBus.Error.ServiceUnknown: The name com.orneyfish.RogControl.Hotkeys was not provided by any .service files]
+open rc=0
+shown
+hidden
+forward from performance:
+asusctl profile set Quiet
+powerprofilesctl set power-saver
+expect: asusctl profile set Quiet + powerprofilesctl set power-saver
+back from performance:
+asusctl profile set Balanced
+powerprofilesctl set balanced
+expect: asusctl profile set Balanced + powerprofilesctl set balanced
+/bin/sh: line 1: kill: (995647) - No such process
+--- (script exits 143 because its last statement is 'wait' on the killed app; not an app error)
+--- full fake log after the back cycle (shows nothing else was written; notify-send matches Python main.py:576 notify_osd):
+asusctl profile set Balanced
+powerprofilesctl set balanced
+notify-send -a ROG Control -t 2000 Performance mode Balanced

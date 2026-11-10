@@ -1,0 +1,5 @@
+$ timeout 180 dbus-run-session -- bash $T/e10.sh   (verbatim from evals.md E10)
+hidden 10 s: tool calls=0 cpu ticks=1 (100/s)
+visible 6 s: temperature polls=3
+hidden again 6 s: tool calls=0
+/bin/sh: line 1: kill: (1000425) - No such process

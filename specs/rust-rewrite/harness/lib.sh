@@ -40,6 +40,7 @@ sizeok() { local a b; a=$(magick identify -format '%w %h' "$1"); b=$(magick iden
   echo "$a vs $b"; echo "$a $b" | awk '{ dw=$1-$3; dh=$2-$4; exit !((dw<5&&dw>-5)&&(dh<5&&dh>-5)) }'; }
 # app [args]  -> runs the binary under test with the fake hardware tools on PATH.
 #   HOME is $H (a throwaway copy of the config) unless APPHOME is set. Needs BIN, FAKE, H.
-app() { env PATH="$FAKE:$PATH" HOME="${APPHOME:-$H}" "$BIN" "$@"; }
+# In a subshell (app ... & pid=$!, $(app ...), a pipeline) it execs, so $! is the binary and `kill $pid` stops it.
+app() { if [ "$BASHPID" != "$$" ]; then exec env PATH="$FAKE:$PATH" HOME="${APPHOME:-$H}" "$BIN" "$@"; else env PATH="$FAKE:$PATH" HOME="${APPHOME:-$H}" "$BIN" "$@"; fi; }
 # closewin <hyprland-address>  -> closes that window like its title-bar x (Hyprland 0.57 Lua dispatcher; verified)
 closewin() { hyprctl dispatch "hl.dsp.window.close({ window = \"address:$1\" })" >/dev/null; }
