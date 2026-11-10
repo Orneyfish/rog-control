@@ -1,0 +1,13 @@
+[Unit]
+Description=ROG Control tray (ASUS performance profile, battery, fans, RGB)
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /home/orneyfish/Projects/rog-control/main.py
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=graphical-session.target

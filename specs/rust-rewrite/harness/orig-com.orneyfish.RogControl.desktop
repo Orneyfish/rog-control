@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=ROG Control
+Comment=Tray control for ASUS ROG performance profile, battery, fans, and RGB
+Exec=/usr/bin/python3 /home/orneyfish/Projects/rog-control/main.py
+Icon=com.orneyfish.RogControl
+Terminal=false
+Categories=System;
+StartupWMClass=com.orneyfish.RogControl
