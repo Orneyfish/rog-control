@@ -21,6 +21,9 @@ struct AppState {
     cfg: Cfg,
     popup: RefCell<Option<Rc<RogPopup>>>,
     automation: RefCell<Option<Rc<AutomationManager>>>,
+    /// GLib keeps the shared session connection (and our exported objects) alive only while
+    /// somebody holds a reference.
+    connection: RefCell<Option<gio::DBusConnection>>,
     failed: Cell<bool>,
 }
 
@@ -112,26 +115,19 @@ impl AppState {
             }
         };
 
-        let cb = |f: fn(&Rc<AppState>)| {
-            let weak = Rc::downgrade(self);
+        let weak = Rc::downgrade(self);
+        let on_state = move |f: fn(&Rc<AppState>)| {
+            let weak = weak.clone();
             move || {
                 if let Some(s) = weak.upgrade() {
                     f(&s);
                 }
             }
         };
-        let (activate, secondary, open_cb, cycle_cb, cycle_back_cb) = (
-            cb(Self::toggle_popup),
-            cb(Self::quit),
-            cb(Self::toggle_popup),
-            cb(|s| s.cycle(1)),
-            cb(|s| s.cycle(-1)),
-        );
         let weak = Rc::downgrade(self);
-        let scroll = move |_delta: i32| {
-            // Any scroll cycles to the next profile, as G-Helper / omarchy-asus's tray does.
+        let cycle_step = move |step: i32| {
             if let Some(s) = weak.upgrade() {
-                s.cycle(1);
+                s.cycle(step);
             }
         };
         let weak = Rc::downgrade(self);
@@ -144,18 +140,13 @@ impl AppState {
         if let Err(e) = tray::register_item(
             &connection,
             icon_path,
-            TrayHandlers { activate: Box::new(activate), secondary_activate: Box::new(secondary), scroll: Box::new(scroll) },
+            TrayHandlers::new(on_state(Self::toggle_popup), on_state(Self::quit), cycle_step.clone()),
         ) {
             eprintln!("rog-control: tray item not exported: {e}");
         }
         tray::register_with_watcher(connection.clone(), 10);
 
-        let handlers = ControlHandlers {
-            open: Box::new(open_cb),
-            cycle: Box::new(cycle_cb),
-            cycle_back: Box::new(cycle_back_cb),
-            open_window: Box::new(open_window),
-        };
+        let handlers = ControlHandlers::new(on_state(Self::toggle_popup), cycle_step, open_window);
         if let Err(e) = control::register_control(&connection, handlers) {
             eprintln!("rog-control: control service not exported: {e}");
             self.failed.set(true);
@@ -172,6 +163,7 @@ impl AppState {
             app.quit();
         });
 
+        *self.connection.borrow_mut() = Some(connection);
         let weak = Rc::downgrade(self);
         let refresh_ui: Rc<dyn Fn()> = Rc::new(move || {
             if let Some(s) = weak.upgrade() {
@@ -191,6 +183,7 @@ pub fn run() -> ExitCode {
         cfg: config::new_cfg(config::load()),
         popup: RefCell::new(None),
         automation: RefCell::new(None),
+        connection: RefCell::new(None),
         failed: Cell::new(false),
     });
     // No window at boot: hold() keeps the process alive with nothing shown.

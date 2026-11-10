@@ -38,6 +38,18 @@ pub struct TrayHandlers {
     pub scroll: Box<dyn Fn(i32)>,
 }
 
+impl TrayHandlers {
+    /// Left click toggles the window, right click quits, and any scroll cycles to the NEXT
+    /// profile (as G-Helper / omarchy-asus's tray does), whichever way the wheel turned.
+    pub fn new(activate: impl Fn() + 'static, secondary_activate: impl Fn() + 'static, cycle_step: impl Fn(i32) + 'static) -> Self {
+        Self {
+            activate: Box::new(activate),
+            secondary_activate: Box::new(secondary_activate),
+            scroll: Box::new(move |_delta| cycle_step(1)),
+        }
+    }
+}
+
 /// Value of one SNI property; `icon_theme_path` is where the installed `hicolor` icon tree lives.
 pub fn property(name: &str, icon_theme_path: &str) -> glib::Variant {
     match name {

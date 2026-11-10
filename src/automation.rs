@@ -5,7 +5,7 @@
 //! always-on, remembered once per power source (no opt-in); GPU "Optimized" and Screen "Auto" are
 //! the two settings with a genuine opt-in, chosen among each setting's own normal options.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use gtk::gio::{self, prelude::*};
@@ -19,6 +19,9 @@ pub struct AutomationManager {
     cfg: Cfg,
     refresh_ui: Rc<dyn Fn()>,
     on_battery: Cell<Option<bool>>,
+    /// GLib keeps the shared bus connection (and with it our subscription) alive only while
+    /// somebody holds a reference, so this one must.
+    _system_bus: RefCell<Option<gio::DBusConnection>>,
 }
 
 impl AutomationManager {
@@ -29,7 +32,7 @@ impl AutomationManager {
         if let Ok(bus) = gio::bus_get_sync(gio::BusType::System, gio::Cancellable::NONE) {
             let weak = Rc::downgrade(&this);
             // The subscription lives as long as the connection (the process); never unsubscribed.
-            let _ = bus.signal_subscribe(
+            let _subscription = bus.signal_subscribe(
                 None,
                 Some("org.freedesktop.DBus.Properties"),
                 Some("PropertiesChanged"),
@@ -73,13 +76,14 @@ impl AutomationManager {
                     }
                 },
             );
+            *this._system_bus.borrow_mut() = Some(bus);
         }
         this
     }
 
     /// A manager that is not (yet) connected to UPower; the power source is set by hand.
     pub fn new(cfg: Cfg, refresh_ui: Rc<dyn Fn()>) -> Rc<Self> {
-        Rc::new(Self { cfg, refresh_ui, on_battery: Cell::new(None) })
+        Rc::new(Self { cfg, refresh_ui, on_battery: Cell::new(None), _system_bus: RefCell::new(None) })
     }
 
     /// `None` until UPower has answered (or when it is unavailable).

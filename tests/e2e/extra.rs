@@ -12,6 +12,7 @@ use gtk::prelude::*;
 use rog_control::automation::AutomationManager;
 use rog_control::config;
 use rog_control::control::{dispatch, method_for_args, ControlHandlers};
+use rog_control::tray::TrayHandlers;
 use rog_control::extra::ExtraWindow;
 use rog_control::fans::{FanCurveEditor, FansPowerWindow, DEFAULT_CURVE};
 use rog_control::hw::*;
@@ -37,6 +38,8 @@ pub fn tests() -> Vec<(&'static str, fn())> {
         profile_cycle__direction_and_wrap,
         control__dispatch_maps_each_method_and_rejects_bad_input,
         control__flags_select_the_method,
+        control__cycle_methods_step_forward_and_back,
+        tray__scroll_always_cycles_forward,
         config__save_is_atomic_and_keeps_unknown_keys,
         config__corrupt_missing_and_misshapen_files_give_defaults,
         startup_panel__switch_runs_enable_and_disable,
@@ -283,6 +286,27 @@ fn control__flags_select_the_method() {
     assert_eq!(method_for_args(&strings(&["--cycle-profile-back"])), Some("CycleProfileBack"));
     assert_eq!(method_for_args(&strings(&["--bogus"])), None);
     assert_eq!(method_for_args(&[]), None);
+}
+
+// guards: FR-3 - CycleProfile steps forward, CycleProfileBack steps backward
+fn control__cycle_methods_step_forward_and_back() {
+    let steps: Rc<RefCell<Vec<i32>>> = Rc::default();
+    let sink = steps.clone();
+    let handlers = ControlHandlers::new(|| {}, move |step| sink.borrow_mut().push(step), |_| Ok(()));
+    let none = ().to_variant();
+    dispatch(&handlers, "CycleProfile", &none).expect("CycleProfile");
+    dispatch(&handlers, "CycleProfileBack", &none).expect("CycleProfileBack");
+    assert_eq!(*steps.borrow(), [1, -1]);
+}
+
+// guards: FR-9 - any scroll on the tray icon cycles to the next profile
+fn tray__scroll_always_cycles_forward() {
+    let steps: Rc<RefCell<Vec<i32>>> = Rc::default();
+    let sink = steps.clone();
+    let handlers = TrayHandlers::new(|| {}, || {}, move |step| sink.borrow_mut().push(step));
+    (handlers.scroll)(1);
+    (handlers.scroll)(-1);
+    assert_eq!(*steps.borrow(), [1, 1]);
 }
 
 // guards: FR-29 - saves are atomic and never drop keys this version does not know

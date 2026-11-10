@@ -37,6 +37,25 @@ pub struct ControlHandlers {
     pub open_window: OpenWindowFn,
 }
 
+impl ControlHandlers {
+    /// `cycle_step(+1)` is the next profile, `cycle_step(-1)` the previous one: `CycleProfile`
+    /// goes forward and `CycleProfileBack` backward.
+    pub fn new(
+        open: impl Fn() + 'static,
+        cycle_step: impl Fn(i32) + 'static,
+        open_window: impl Fn(&str) -> Result<(), String> + 'static,
+    ) -> Self {
+        let cycle_step = Rc::new(cycle_step);
+        let back = cycle_step.clone();
+        Self {
+            open: Box::new(open),
+            cycle: Box::new(move || cycle_step(1)),
+            cycle_back: Box::new(move || back(-1)),
+            open_window: Box::new(open_window),
+        }
+    }
+}
+
 /// Runs one method call; `Err` carries the D-Bus error to send back.
 pub fn dispatch(handlers: &ControlHandlers, method: &str, params: &glib::Variant) -> Result<(), (gio::DBusError, String)> {
     match method {

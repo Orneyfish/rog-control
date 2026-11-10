@@ -590,36 +590,48 @@ fn config_persistence__save_load_round_trip() {
 // Widget construction -- every panel / window must build, and have what the reference has.
 // ---------------------------------------------------------------------------
 
-fn button_texts(buttons: &[(&str, gtk::ToggleButton)]) -> Vec<String> {
-    buttons.iter().map(|(name, _)| name.to_string()).collect()
+/// The visible text of an icon-over-text mode button (or a plain labelled one).
+fn visible_text(btn: &gtk::ToggleButton) -> String {
+    if let Some(label) = btn.label() {
+        return label.to_string();
+    }
+    btn.child().and_then(|c| c.last_child()).and_downcast::<gtk::Label>().map(|l| l.label().to_string()).unwrap_or_default()
+}
+
+fn visible_texts(buttons: &[(&str, gtk::ToggleButton)]) -> Vec<String> {
+    buttons.iter().map(|(_, b)| visible_text(b)).collect()
 }
 
 // ports: TestWidgetConstruction.test_performance_panel
 fn widget_construction__performance_panel() {
     let panel = PerformancePanel::new(no_toast(), make_cfg(), no_save(), on_ac(), Rc::new(|| {}));
-    assert_eq!(button_texts(&panel.buttons), ["Quiet", "Balanced", "Performance"]);
+    assert_eq!(visible_texts(&panel.buttons), ["Silent", "Balanced", "Turbo"]);
+    assert_eq!(panel.fans_button.child().and_then(|c| c.last_child()).and_downcast::<gtk::Label>().map(|l| l.label().to_string()).as_deref(), Some("Fans + Power"));
     assert!(panel.header.stat.label().starts_with("CPU: "), "{}", panel.header.stat.label());
 }
 
 // ports: TestWidgetConstruction.test_gpu_panel
 fn widget_construction__gpu_panel() {
     let panel = GpuPanel::new(no_toast(), make_cfg(), no_save(), on_ac(), Rc::new(|| None));
-    assert_eq!(button_texts(&panel.buttons), ["Eco", "Standard", "Ultimate", "Optimized"]);
+    assert_eq!(visible_texts(&panel.buttons), ["Eco", "Standard", "Ultimate", "Optimized"]);
     assert!(panel.header.stat.label().starts_with("GPU: "), "{}", panel.header.stat.label());
 }
 
 // ports: TestWidgetConstruction.test_screen_panel
 fn widget_construction__screen_panel() {
+    let _m = monitors_capture(monitor_json(&[("eDP-1", 0, 0)]));
     let panel = ScreenPanel::new(no_toast(), make_cfg(), no_save());
     let keys: Vec<&str> = panel.buttons.iter().map(|(k, _)| *k).collect();
     assert_eq!(keys, ["auto", "60", "max"]);
     pump(300);
+    assert_eq!(visible_texts(&panel.buttons)[..2], ["Auto", "60Hz"]);
+    assert!(visible_text(&panel.buttons[2].1).ends_with("Hz + OD"), "{}", visible_text(&panel.buttons[2].1));
 }
 
 // ports: TestWidgetConstruction.test_keyboard_panel
 fn widget_construction__keyboard_panel() {
     let panel = KeyboardPanel::new(no_toast(), make_cfg(), no_save(), on_ac(), Rc::new(|| {}));
-    assert_eq!(button_texts(&panel.buttons), ["off", "low", "med", "high"]);
+    assert_eq!(visible_texts(&panel.buttons), ["Off", "Low", "Medium", "High"]);
     assert_eq!(panel.effect_dropdown.model().expect("effect model").n_items() as usize, aura_effect_names().len());
 }
 
@@ -632,9 +644,13 @@ fn widget_construction__battery_panel() {
 
 // ports: TestWidgetConstruction.test_startup_panel
 fn widget_construction__startup_panel() {
-    let panel = StartupPanel::new(no_toast());
-    pump(300);
-    assert!(panel.root.first_child().is_some());
+    // The switch mirrors `systemctl --user is-enabled rog-control.service`.
+    for (answer, expected) in [("enabled\n", true), ("disabled\n", false)] {
+        let _c = fake_capture(move |argv| is(argv, &["systemctl", "--user", "is-enabled", "rog-control.service"]).then(|| ok_out(answer)));
+        let panel = StartupPanel::new(no_toast());
+        pump(300);
+        assert_eq!(panel.switch.is_active(), expected, "{answer:?}");
+    }
 }
 
 // ports: TestWidgetConstruction.test_footer_panel
