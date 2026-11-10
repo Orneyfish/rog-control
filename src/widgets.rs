@@ -126,7 +126,8 @@ pub fn switch_row(text: &str, handler: impl Fn(&gtk::Switch, bool) -> glib::Prop
     SwitchRow { root, switch }
 }
 
-/// Modal Cancel / `ok_label` dialog; `on_confirm` runs only on the OK response.
+/// Modal Cancel / `ok_label` dialog; `on_confirm` runs only on the OK response. Cancel is the
+/// default and the close response.
 pub fn confirm_dialog(
     parent: Option<&gtk::Widget>,
     heading: &str,
@@ -134,7 +135,7 @@ pub fn confirm_dialog(
     ok_label: &str,
     on_confirm: Box<dyn FnOnce()>,
     destructive: bool,
-) {
+) -> adw::AlertDialog {
     let dialog = adw::AlertDialog::new(Some(heading), Some(body));
     dialog.add_response("cancel", "Cancel");
     dialog.add_response("ok", ok_label);
@@ -152,6 +153,7 @@ pub fn confirm_dialog(
         }
     });
     dialog.present(parent);
+    dialog
 }
 
 /// Coalesces rapid repeated triggers into one call, fired after `delay_ms` of quiet.

@@ -9,7 +9,7 @@ use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::io::{self, Read};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::rc::Rc;
 use std::sync::mpsc;
@@ -344,8 +344,4 @@ pub fn py_round(x: f64) -> i64 {
 /// First `n` characters (Python's `s[:n]`), safe on multi-byte text.
 pub fn truncate_chars(s: &str, n: usize) -> String {
     s.chars().take(n).collect()
-}
-
-pub fn path_exists(p: &Path) -> bool {
-    p.exists()
 }

@@ -8,7 +8,7 @@ use std::cell::RefCell;
 use std::io;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
-use gtk::prelude::*;
+use adw::prelude::*;
 use rog_control::automation::AutomationManager;
 use rog_control::config;
 use rog_control::control::{dispatch, method_for_args, ControlHandlers};
@@ -33,6 +33,8 @@ pub fn tests() -> Vec<(&'static str, fn())> {
         run_cmd__reports_spawn_and_timeout_errors,
         gpu_panel__mux_change_waits_for_confirmation_then_reboots_after_success,
         gpu_panel__declined_confirmation_changes_nothing,
+        gpu_panel__real_dialog_blocks_until_answered,
+        widgets__confirm_dialog_runs_only_on_ok,
         gpu_panel__failed_mux_write_toasts_and_never_reboots,
         gpu_panel__switch_without_mux_change_applies_at_once_and_never_reboots,
         profile_cycle__direction_and_wrap,
@@ -185,6 +187,35 @@ fn gpu_panel__declined_confirmation_changes_nothing() {
     // ...and the buttons were resynced to the real, unchanged state.
     let active: Vec<&str> = rig.panel.buttons.iter().filter(|(_, b)| b.is_active()).map(|(n, _)| *n).collect();
     assert_eq!(active, ["Standard"]);
+}
+
+// guards: FR-17 - with the real dialog (not a stand-in) nothing happens until it is answered
+fn gpu_panel__real_dialog_blocks_until_answered() {
+    let _s = sysfs_map(&[(GPU_MUX_PATH, "1"), (DGPU_DISABLE_PATH, "0")]);
+    let (log, _c) = recording_capture(|_| ok_out(""));
+    let parent = gtk::Window::new();
+    let root = parent.clone();
+    let panel = GpuPanel::new(no_toast(), make_cfg(), no_save(), on_ac(), Rc::new(move || Some(root.clone().upcast::<gtk::Widget>())));
+    click(&panel, "Ultimate");
+    pump(400);
+    assert!(seen(&log).is_empty(), "the MUX was written while the dialog was still open: {:?}", seen(&log));
+}
+
+// guards: FR-17 - the confirmation dialog defaults to Cancel and only OK runs the action
+fn widgets__confirm_dialog_runs_only_on_ok() {
+    use rog_control::widgets::confirm_dialog;
+    let parent = gtk::Window::new();
+    let ran = Rc::new(RefCell::new(0));
+    let counter = ran.clone();
+    let dialog = confirm_dialog(Some(parent.upcast_ref()), "Reboot now?", "Needs a restart", "Reboot", Box::new(move || *counter.borrow_mut() += 1), true);
+    assert_eq!(*ran.borrow(), 0, "ran before any answer");
+    assert_eq!(dialog.default_response().as_deref(), Some("cancel"));
+    assert_eq!(dialog.close_response(), "cancel");
+    assert_eq!(dialog.response_appearance("ok"), adw::ResponseAppearance::Destructive);
+    dialog.emit_by_name::<()>("response", &[&"cancel"]);
+    assert_eq!(*ran.borrow(), 0, "Cancel ran the action");
+    dialog.emit_by_name::<()>("response", &[&"ok"]);
+    assert_eq!(*ran.borrow(), 1, "OK did not run the action");
 }
 
 // guards: FR-17/23 - a refused or failed MUX write reports a toast and never reboots
@@ -355,8 +386,9 @@ fn startup_panel__switch_runs_enable_and_disable() {
     assert!(!panel.switch.is_active());
     assert!(seen(&log).is_empty(), "syncing the switch must not run enable/disable: {:?}", seen(&log));
     panel.switch.set_active(true);
+    pump(200); // the two commands run on separate worker threads: let the first land first
     panel.switch.set_active(false);
-    pump(300);
+    pump(200);
     assert_eq!(seen(&log), ["systemctl --user enable rog-control.service", "systemctl --user disable rog-control.service"]);
 }
 
