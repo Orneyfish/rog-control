@@ -31,3 +31,5 @@ Only report what you can show with evidence. Nothing found: write `no findings`.
 
 ## Rules learned over time
 <!-- One line each. Add when a review missed a bug that surfaced later, or flagged the same non-problem more than once. -->
+- Any value written into a unit or desktop file, or used as an install target (PREFIX, HOME, XDG_*), is validated up front, before any build or write: absolute, and no whitespace, quote, backslash, `%`, `$` or backtick (class `unvalidated-path-written-into-unit`).
+- A test's skip condition comes from the machine, never from the code under test; every hardware write that can fail has a failure-toast test; a loop over a code-defined collection asserts it is non-empty; tests never claim fixed machine-global names (app ids, bus names, /tmp paths) (classes `vacuous-pass-on-missing-fixture`, `untested-failure-toast`, `skip-condition-derived-from-code-under-test`, `test-global-name-collision`).
