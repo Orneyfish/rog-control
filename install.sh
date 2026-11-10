@@ -94,12 +94,16 @@ if [ -n "$missing" ]; then
 fi
 
 # 2. Build first: a failed build must leave the machine exactly as it was.
+# Build into ./target whatever CARGO_TARGET_DIR or a cargo `target-dir` setting says (--target-dir wins
+# over both), and remove the old binary first: a copy left there by an earlier build must never be
+# mistaken for the one this run builds. cargo re-links a removed binary from its cache in no time.
+rm -f target/release/rog-control
 say "building (cargo build --release --locked)"
-if ! cargo build --release --locked; then
+if ! cargo build --release --locked --target-dir target; then
   echo "install.sh: the build failed; nothing was installed and the service was not touched." >&2
   exit 1
 fi
-[ -x target/release/rog-control ] || { echo "install.sh: target/release/rog-control is missing after the build" >&2; exit 1; }
+[ -x target/release/rog-control ] || { echo "install.sh: cargo did not produce target/release/rog-control; nothing was installed" >&2; exit 1; }
 
 tmpfiles=()
 cleanup() { for f in ${tmpfiles[@]+"${tmpfiles[@]}"}; do rm -f "$f"; done; }

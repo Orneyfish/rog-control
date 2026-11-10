@@ -23,6 +23,9 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::time::Instant;
 
 fn main() {
+    if let Some(id) = std::env::var_os("ROG_E2E_HOLD_APP_ID") {
+        common::hold_application_id(&id.to_string_lossy());
+    }
     if gtk::init().is_err() {
         eprintln!("error: GTK could not open a display; these tests build real widgets");
         std::process::exit(1);

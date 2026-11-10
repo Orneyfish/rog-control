@@ -51,6 +51,7 @@ pub fn tests() -> Vec<(&'static str, fn())> {
         config__misshapen_sections_are_kept_before_they_are_replaced,
         config__save_refuses_to_overwrite_when_no_copy_can_be_made,
         install__refuses_a_prefix_that_would_corrupt_the_unit,
+        install__never_installs_a_stale_binary_when_cargo_builds_elsewhere,
         startup_panel__switch_runs_enable_and_disable,
         keyboard_panel__level_buttons_send_leds_set_and_are_remembered_per_power_source,
         performance_panel__profile_buttons_apply_pair_and_remember,
@@ -76,6 +77,9 @@ pub fn tests() -> Vec<(&'static str, fn())> {
         battery_text__charging_and_health,
         theme__filters_only_known_environment_noise,
     ]
+    .into_iter()
+    .chain(crate::startup::guard_tests())
+    .collect()
 }
 
 /// A capture hook that records every non-read command and answers it with `reply`.
@@ -705,13 +709,17 @@ fn install__refuses_a_prefix_that_would_corrupt_the_unit() {
     std::fs::write(&cargo, format!("#!/bin/sh\ntouch '{}'\nexit 1\n", ran.display())).expect("fake cargo");
     std::fs::set_permissions(&cargo, std::fs::Permissions::from_mode(0o755)).expect("chmod");
     let path = format!("{}:{}", fakebin.display(), std::env::var("PATH").unwrap_or_default());
-    let script = concat!(env!("CARGO_MANIFEST_DIR"), "/install.sh");
+    // Run a copy: install.sh works inside the directory it lives in and clears the old binary there
+    // before it builds, which must never happen in the real checkout's ./target.
+    let script = root.0.join("checkout/install.sh");
+    std::fs::create_dir_all(script.parent().expect("parent")).expect("checkout dir");
+    std::fs::copy(concat!(env!("CARGO_MANIFEST_DIR"), "/install.sh"), &script).expect("copy install.sh");
     let abs = |name: &str| root.0.join(name).to_string_lossy().into_owned();
     // `vars` are set exactly as given, and relative ones resolve against `root`, not the checkout.
     let run = |vars: &[(&str, String)]| {
         let _ = std::fs::remove_file(&ran);
         let mut cmd = Command::new("bash");
-        cmd.arg(script).arg("--no-enable").current_dir(&root.0).env_clear().env("PATH", &path).env("HOME", abs("home"));
+        cmd.arg(&script).arg("--no-enable").current_dir(&root.0).env_clear().env("PATH", &path).env("HOME", abs("home"));
         for (var, value) in vars {
             cmd.env(var, value);
         }
@@ -745,6 +753,67 @@ fn install__refuses_a_prefix_that_would_corrupt_the_unit() {
         assert_eq!(code, Some(1), "{vars:?} was refused: {err}");
         assert!(ran.exists(), "{vars:?} never reached the build: {err}");
     }
+}
+
+// guards: F15 - install.sh installs the binary cargo just built, never a stale one left in ./target
+fn install__never_installs_a_stale_binary_when_cargo_builds_elsewhere() {
+    use std::os::unix::fs::PermissionsExt;
+    use std::process::Command;
+    let root = TempDir::new("install-stale");
+    let script = concat!(env!("CARGO_MANIFEST_DIR"), "/install.sh");
+    let write_exe = |path: &std::path::Path, body: &str| {
+        std::fs::create_dir_all(path.parent().expect("parent")).expect("mkdir");
+        std::fs::write(path, body).expect("write");
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+    };
+    // A scratch checkout (install.sh builds and installs from the directory it lives in) so the
+    // real ./target is never touched. `stale` is what an earlier build left there.
+    let checkout = |name: &str| {
+        let dir = root.0.join(name);
+        for icon in ["scalable/apps/com.orneyfish.RogControl.svg", "scalable/status/rog-control-symbolic.svg"] {
+            let to = dir.join("icons/hicolor").join(icon);
+            std::fs::create_dir_all(to.parent().expect("parent")).expect("mkdir");
+            std::fs::copy(concat!(env!("CARGO_MANIFEST_DIR"), "/icons/hicolor/").to_string() + icon, &to).expect("copy icon");
+        }
+        std::fs::copy(script, dir.join("install.sh")).expect("copy install.sh");
+        write_exe(&dir.join("target/release/rog-control"), "stale");
+        dir
+    };
+    // Cargo honours --target-dir over CARGO_TARGET_DIR over its default `target` (what `cargo` itself does).
+    let honest = "#!/bin/sh\ndir=${CARGO_TARGET_DIR:-target}\nwhile [ $# -gt 0 ]; do [ \"$1\" = --target-dir ] && dir=$2; shift; done\nmkdir -p \"$dir/release\" && printf fresh > \"$dir/release/rog-control\" && chmod +x \"$dir/release/rog-control\"\n";
+    // "Succeeds", but the binary lands somewhere install.sh cannot know about.
+    let lost = "#!/bin/sh\nmkdir -p lost/release && printf fresh > lost/release/rog-control\n";
+    let run = |name: &str, cargo: &str| {
+        let co = checkout(name);
+        let fakebin = root.0.join(format!("{name}-bin"));
+        write_exe(&fakebin.join("cargo"), cargo);
+        let home = root.0.join(format!("{name}-home"));
+        let out = Command::new("bash")
+            .arg(co.join("install.sh"))
+            .arg("--no-enable")
+            .env_clear()
+            .env("PATH", format!("{}:{}", fakebin.display(), std::env::var("PATH").unwrap_or_default()))
+            .env("HOME", &home)
+            .env("CARGO_TARGET_DIR", root.0.join(format!("{name}-elsewhere")))
+            .output()
+            .expect("run install.sh");
+        let installed = std::fs::read_to_string(home.join(".local/bin/rog-control")).ok();
+        (out.status.code(), String::from_utf8_lossy(&out.stderr).into_owned(), installed, home, root.0.join(format!("{name}-elsewhere")))
+    };
+
+    // CARGO_TARGET_DIR points elsewhere (so does a cargo `target-dir` setting): the build must still
+    // land in, and be installed from, ./target.
+    let (code, err, installed, _, elsewhere) = run("honest", honest);
+    assert_eq!(code, Some(0), "install failed: {err}");
+    assert_eq!(installed.as_deref(), Some("fresh"), "installed the stale binary instead of the one just built");
+    assert!(!elsewhere.exists(), "the build went to CARGO_TARGET_DIR, not the directory install.sh installs from");
+
+    // A cargo that reports success without producing ./target/release/rog-control: the stale file
+    // that is still there must not be mistaken for it. Fail loudly and install nothing.
+    let (code, err, installed, home, _) = run("lost", lost);
+    assert_eq!(code, Some(1), "a build that produced no binary where install.sh looks was accepted: {err}");
+    assert!(err.contains("target/release/rog-control"), "the failure does not name the missing binary: {err}");
+    assert!(installed.is_none() && !home.exists(), "files were installed although the fresh binary is missing");
 }
 
 pub fn monitor_fake(refresh: f64) -> rog_control::sys::CaptureGuard {

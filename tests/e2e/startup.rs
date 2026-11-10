@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 use gtk::gio::{self, prelude::*};
 use rog_control::control::{CONTROL_NAME, CONTROL_PATH};
 
-use crate::common::TempDir;
+use crate::common::{TempDir, CONSTRUCTION_APP_BASE};
 
 const BUDGET: Duration = Duration::from_secs(5);
 const RUNS: usize = 3;
@@ -32,6 +32,10 @@ pub fn ported_tests() -> Vec<(&'static str, fn())> {
         ("app_startup__starts_and_answers_within_budget", app_startup__starts_and_answers_within_budget as fn()),
         ("app_startup__launching_again_while_running_does_not_hang", app_startup__launching_again_while_running_does_not_hang as fn()),
     ]
+}
+
+pub fn guard_tests() -> Vec<(&'static str, fn())> {
+    vec![("app_id__a_held_construction_id_cannot_crash_the_construction_test", app_id__a_held_construction_id_cannot_crash_the_construction_test as fn())]
 }
 
 struct PrivateBus {
@@ -72,6 +76,10 @@ impl Drop for PrivateBus {
     fn drop(&mut self) {
         let _ = self.daemon.kill();
         let _ = self.daemon.wait();
+        // A killed daemon cannot unlink its socket; without this every run left one in /tmp.
+        if let Some(socket) = self.address.strip_prefix("unix:path=").and_then(|a| a.split(',').next()) {
+            let _ = std::fs::remove_file(socket);
+        }
     }
 }
 
@@ -261,6 +269,67 @@ fn app_startup__launching_again_while_running_does_not_hang() {
         assert!(first.try_wait().expect("poll first").is_none(), "the running instance must survive a second launch");
     }));
     stop(&mut first);
+    if let Err(e) = outcome {
+        std::panic::resume_unwind(e);
+    }
+}
+
+// guards: F14 - an application id another process already owns must not take the test runner down
+fn app_id__a_held_construction_id_cannot_crash_the_construction_test() {
+    // Before the fix the construction test registered the fixed id `com.test.ConstructionCheck`. With
+    // a registered application elsewhere holding that name (a second `cargo test`, an eval run),
+    // register() still returned Ok, as a remote instance whose `startup` never ran, and
+    // `set_application` then SEGVed the runner: exit by signal 11, no summary, every later test
+    // unreported. Hold the old id in one process (this binary in its `ROG_E2E_HOLD_APP_ID` mode) and
+    // run the construction test in a second one, both on a private bus.
+    if skip_without_dbus_daemon() {
+        return;
+    }
+    let bus = PrivateBus::start().expect("private bus");
+    let conn = bus.connect();
+    let dir = TempDir::new("heldid");
+    let exe = std::env::current_exe().expect("this test binary");
+    let mut holder = Command::new(&exe)
+        .env("ROG_E2E_HOLD_APP_ID", CONSTRUCTION_APP_BASE)
+        .env("DBUS_SESSION_BUS_ADDRESS", &bus.address)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("start the process that holds the id");
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while !name_has_owner(&conn, CONSTRUCTION_APP_BASE) {
+            assert!(holder.try_wait().ok().flatten().is_none(), "the holder exited before it owned {CONSTRUCTION_APP_BASE}");
+            assert!(Instant::now() < deadline, "nobody owns {CONSTRUCTION_APP_BASE} after 20s");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let (out, err) = (dir.0.join("stdout"), dir.0.join("stderr"));
+        let mut child = Command::new(&exe)
+            .arg("widget_construction__full_rog_popup")
+            .env("DBUS_SESSION_BUS_ADDRESS", &bus.address)
+            .stdout(std::fs::File::create(&out).expect("stdout file"))
+            .stderr(std::fs::File::create(&err).expect("stderr file"))
+            .spawn()
+            .expect("run the construction test in another process");
+        let deadline = Instant::now() + Duration::from_secs(60);
+        let status = loop {
+            if let Some(status) = child.try_wait().expect("poll the construction test") {
+                break status;
+            }
+            if Instant::now() >= deadline {
+                stop(&mut child);
+                panic!("the construction test hung for 60s with {CONSTRUCTION_APP_BASE} held");
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        };
+        let stdout = std::fs::read_to_string(&out).unwrap_or_default();
+        let stderr = std::fs::read_to_string(&err).unwrap_or_default();
+        assert!(
+            status.success() && stdout.contains("test widget_construction__full_rog_popup ... ok") && stdout.contains("1 passed; 0 failed"),
+            "with {CONSTRUCTION_APP_BASE} held by another process the construction test ended with {status} (signal 11 is the old SEGV)\n--- stdout ---\n{stdout}\n--- stderr ---\n{stderr}"
+        );
+    }));
+    stop(&mut holder);
     if let Err(e) = outcome {
         std::panic::resume_unwind(e);
     }

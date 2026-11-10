@@ -40,7 +40,11 @@ the installer without touching the real home); they and `HOME` must be absolute
 `ExecStart=`), and `PREFIX` must not hold whitespace, a quote, a backslash,
 `%`, `$` or a backtick (they are written unquoted into the unit). The script
 refuses a bad value up front, before building anything. An existing unit / desktop
-entry it replaces is first kept once as `<name>.pre-rust`.
+entry it replaces is first kept once as `<name>.pre-rust`. The build always goes to
+`./target` (`--target-dir target` beats `CARGO_TARGET_DIR` and a cargo `target-dir`
+setting) and the old binary there is removed first, so a stale one is never installed:
+if cargo does not leave `target/release/rog-control`, the script stops before it changes
+anything.
 
 Run the app directly (foreground, for debugging — stderr shows panics and errors
 instead of the systemd journal):
@@ -272,6 +276,18 @@ command is swallowed and recorded — and tests that need a particular answer re
 it with `fake_capture` / `record_run_cmd` / `hook_sysfs`. The startup tests launch
 the real binary on a private `dbus-daemon` with a throwaway `$HOME` and stand-in
 tools.
+
+A test must not claim anything machine-global and fixed. An application id or D-Bus
+name on the session bus is shared with every other test run and the evals; a second
+owner turns `register()` into a *remote* instance that never gets `startup`, and
+`window.set_application` then SEGVs the whole runner (no summary at all). Make such a
+name per process (`unique_app_id` and `CONSTRUCTION_APP_BASE` in `tests/e2e/common.rs`),
+keep bus traffic on a private `dbus-daemon`, and make temp dirs with `TempDir` (pid +
+counter). `app_id__a_held_construction_id_*` holds the old fixed id from a second
+process (this binary with `ROG_E2E_HOLD_APP_ID` set) to keep that true. The files read
+from the real home (`scheme.json`, `rules.lua`) are read-only fixtures. A test that runs
+`install.sh` must run a copy in a temp dir, never the checkout: it clears
+`target/release/rog-control` before it builds.
 
 ## Rollback to the previous implementation
 

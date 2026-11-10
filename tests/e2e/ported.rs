@@ -725,10 +725,12 @@ fn widget_construction__extra_window() {
 
 // ports: TestWidgetConstruction.test_full_rog_popup
 fn widget_construction__full_rog_popup() {
-    // The real app only builds windows after startup; register an application to match that.
-    let app = adw::Application::builder().application_id("com.test.ConstructionCheck").build();
-    let registered = app.register(gio::Cancellable::NONE).is_ok();
-    let popup = RogPopup::new(registered.then_some(&app), make_cfg(), no_save(), on_ac(), Rc::new(|| {}));
+    // The real app only builds windows after startup; register an application to match that. The id
+    // is per process (see CONSTRUCTION_APP_BASE) and a lost race is a clean failure, not a SEGV.
+    let app = adw::Application::builder().application_id(unique_app_id(CONSTRUCTION_APP_BASE)).build();
+    app.register(gio::Cancellable::NONE).expect("register the construction application");
+    assert!(!app.is_remote(), "another process owns {}: its window would never get a startup", app.application_id().unwrap_or_default());
+    let popup = RogPopup::new(Some(&app), make_cfg(), no_save(), on_ac(), Rc::new(|| {}));
     assert_eq!(popup.window.title().as_deref(), Some("ROG Control"));
     assert!(!popup.window.is_resizable());
     assert!(!popup.is_visible());

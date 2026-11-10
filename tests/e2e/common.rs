@@ -6,7 +6,8 @@ use std::rc::Rc;
 use std::sync::Mutex;
 use std::time::Duration;
 
-use gtk::glib;
+use gtk::gio::prelude::ApplicationExt;
+use gtk::{gio, glib};
 use rog_control::config::{self, Cfg};
 use rog_control::sys::{hook_run_cmd, push_capture_hook, CaptureGuard, CmdOut, RunCmdGuard};
 
@@ -66,6 +67,26 @@ pub fn pump(ms: u64) {
     let quit = main_loop.clone();
     glib::timeout_add_local_once(Duration::from_millis(ms), move || quit.quit());
     main_loop.run();
+}
+
+/// The application id the construction test used to register as is. An application id is a name on
+/// the session bus shared with every other test run and with the evals: if another process owns it,
+/// `register()` still returns Ok but as a *remote* instance, `startup` never runs and
+/// `window.set_application` crashes the whole runner (SEGV, no summary). Never register it bare.
+pub const CONSTRUCTION_APP_BASE: &str = "com.test.ConstructionCheck";
+
+/// `base` made unique to this process, for any bus name a test claims on a bus other runs share.
+pub fn unique_app_id(base: &str) -> String {
+    format!("{base}.p{}", std::process::id())
+}
+
+/// Runner mode for a helper process (see `startup::app_id__...`): own `id` as a registered
+/// application, tell nobody, and serve until killed. Never returns.
+pub fn hold_application_id(id: &str) -> ! {
+    let app = gio::Application::new(Some(id), gio::ApplicationFlags::empty());
+    app.register(gio::Cancellable::NONE).expect("register the held application");
+    glib::MainLoop::new(None, false).run();
+    std::process::exit(0)
 }
 
 pub type Calls = Rc<RefCell<Vec<Vec<String>>>>;
