@@ -316,7 +316,18 @@ fn label_texts(widget: &gtk::Widget, out: &mut Vec<String>) {
 
 // guards: FR-23 - the main window hands its toast overlay to every panel and to each companion it builds
 fn toasts__popup_routes_panel_and_companion_toasts_to_its_overlay() {
-    let _s = sysfs_map(&[(BATTERY_LIMIT_PATH, "100"), (BOOT_SOUND_PATH, "1"), (CHARGE_MODE_PATH, "1"), (PPT_PL1_PATH, "40")]);
+    let _s = sysfs_map(&[
+        (PLATFORM_PROFILE_PATH, "balanced"),
+        (GPU_MUX_PATH, "1"), // hybrid, so Eco is a plain dgpu_disable write with no confirmation
+        (DGPU_DISABLE_PATH, "0"),
+        (KBD_BRIGHTNESS_PATH, "0"),
+        (BATTERY_LIMIT_PATH, "100"),
+        (BOOT_SOUND_PATH, "1"),
+        (CHARGE_MODE_PATH, "1"),
+        (PPT_PL1_PATH, "40"),
+    ]);
+    let _m = monitor_fake(240.0);
+    let _state = fake_capture(|argv| (argv.get(2).map(String::as_str) == Some("is-enabled")).then(|| ok_out("disabled\n")));
     let _t = nvidia_and_ppd_tools();
     let _a = asusd_says_static_red();
     let (_log, _tool) = recording_capture(|_| failed_out("boom"));
@@ -327,8 +338,19 @@ fn toasts__popup_routes_panel_and_companion_toasts_to_its_overlay() {
     };
     // The overlay shows one toast at a time and queues the rest, so each source gets its own window.
     type Trigger = Box<dyn Fn(&Rc<RogPopup>)>;
-    let sources: [(&str, Trigger); 4] = [
-        ("main window panel", Box::new(|p| p.battery.oneshot_button.emit_clicked())),
+    let sources: [(&str, Trigger); 9] = [
+        ("Performance panel", Box::new(|p| press(&p.performance.buttons, "Performance"))),
+        ("GPU panel", Box::new(|p| press(&p.gpu.buttons, "Eco"))),
+        ("Screen panel", Box::new(|p| {
+            pump(100); // the first sync reads the monitor and must not be mistaken for a click
+            press(&p.screen.buttons, "60");
+        })),
+        ("Keyboard panel", Box::new(|p| press(&p.keyboard.buttons, "med"))),
+        ("Battery panel", Box::new(|p| p.battery.oneshot_button.emit_clicked())),
+        ("Startup panel", Box::new(|p| {
+            pump(100);
+            p.startup.switch.set_active(true);
+        })),
         ("Extra window", Box::new(|p| p.ensure_extra().charge_mode_buttons[2].1.set_active(true))),
         ("Lighting window", Box::new(|p| p.ensure_lighting().effect_dropdown.set_selected(effect_index("breathe")))),
         ("Fans and Power window", Box::new(|p| p.ensure_fans().pl1.scale.set_value(70.0))),
