@@ -156,7 +156,8 @@ echo "stderr offenders: $(grep -cE 'Theme parser|CRITICAL|panicked at' $T/e7.err
 kill $pid; wait $pid 2>/dev/null
 ```
   Then open `$T/rust/ROG_Control.png` and `specs/rust-rewrite/ref/ROG_Control.png` side by side and tick off, in order: title `ROG Control` + device name; section headings Performance Mode, GPU Mode, Screen, Laptop Keyboard, Battery Charge Limit, Run on Startup; the buttons Silent, Balanced, Turbo, Fans + Power, Eco, Standard, Ultimate, Optimized, Auto, 60Hz, 240Hz + OD, Off, Low, Medium, High, Extra, the effect dropdown and colour swatch, the Full button, Firmware, Quit; every icon present; the live status labels (CPU temp / fan, GPU temp / fan, battery).
-- pass when: `size-ok`, `look-ok` (`imgsame` prints `AE3 RMSE_small` at most `0.015 0.02`), the control line says `control ok`, `stderr offenders: 0`, and every item in the checklist is present, in the same place, with the same wording.
+  One deliberate exception (user decision D16): the Keyboard effect dropdown and its colour swatch are expected to differ from the Python capture, because the Python app's hard-coded asusd path is stale on this machine and always showed `static`. In the Rust capture they must show the effect asusd reports right now. Read it with `busctl --system tree xyz.ljones.Asusd` (lists the `/xyz/ljones/aura/<id>` object), then `busctl --system get-property xyz.ljones.Asusd /xyz/ljones/aura/<id> xyz.ljones.Aura LedModeData` (read-only), map the mode index with `AURA_MODE_INDEX` in `src/hw.rs`, and name the effect you expect in results.md. If asusd reports `static` say so; then this exception is vacuous and E13 row 12 carries the proof.
+- pass when: `size-ok`, `look-ok` (`imgsame` prints `AE3 RMSE_small` at most `0.015 0.02`), the control line says `control ok`, `stderr offenders: 0`, every item in the checklist is present, in the same place, with the same wording, and the Keyboard effect dropdown shows the effect asusd reports.
 - fail when: the window is a different size, missing an icon or panel, mis-coloured, mis-spaced, an empty or placeholder window (the control proves the comparison rejects those), or GTK reports CSS problems.
 
 ## E8: Companion windows match the reference; open, close and reopen behave
@@ -274,7 +275,8 @@ mkdir -p $T/mut && git ls-files -z | xargs -0 tar -cf - | tar -xf - -C $T/mut &&
   9. Profile cycling: swap forward and backward.
   10. Config: save without the temp-file-and-rename step, or drop unknown keys on save.
   11. Sampling: the tester picks five more ported tests from five different Python classes not touched above (e.g. screen-preset position, RGB reset-to-theme, battery slider range, startup toggle, GPU temperature flicker) and breaks the behaviour each one claims to guard.
-- pass when: every one of the eleven edits (row 11 counts as five) makes `cargo test` report at least one `FAILED` test (name the test in results.md) and the unedited copy passes (`cargo test` ok before each edit).
+  12. Aura: make the asusd Aura object path a constant again (bypass the runtime discovery) or make discovery pick the wrong object.
+- pass when: every one of the twelve edits (row 11 counts as five) makes `cargo test` report at least one `FAILED` test (name the test in results.md) and the unedited copy passes (`cargo test` ok before each edit).
 - fail when: any edit still gives `test result: ok`: the port's tests do not guard that rule, so the rule can regress silently.
 
 ## E14: Install into a clean home
@@ -397,7 +399,7 @@ hyprctl reload; sleep 2; echo "config errors: [$(hyprctl configerrors)]"
 
 ## E20: Hardware state is unchanged by everything above
 - covers: NFR-1
-- check: run after E19 and before E21: `specs/rust-rewrite/harness/hw-snapshot.sh > $T/hw.after; diff $T/hw.before $T/hw.after && echo hardware-unchanged; sha256sum -c $T/realcfg.sha`
+- check: run it AFTER E21 has finished, not before (E19's real `hyprctl reload` re-applies the compositor's own monitor rule, `mode = "preferred"`, which drops the panel to 60 Hz until the service's startup automation sets 240 Hz again; E21 starts that service). Wait for the automation first: `sleep 5; specs/rust-rewrite/harness/hw-snapshot.sh > $T/hw.after; diff $T/hw.before $T/hw.after && echo hardware-unchanged; sha256sum -c $T/realcfg.sha`
 - pass when: the diff is empty and `hardware-unchanged` prints (profile, GPU MUX, dGPU, overdrive, battery limit, keyboard level, fan curves, power plan, refresh rate all as before), and the real config hash still matches.
 - fail when: anything differs: an eval or test reached real hardware despite the fakes, so a code path bypasses `PATH` lookup or a test is not mocked.
 
@@ -430,14 +432,14 @@ awk '/^#+ .*[Rr]ollback/{r=1;next} /^#+ /{r=0} /python|main\.py|unittest/{ if(!r
 grep -c 'cargo test' CLAUDE.md; grep -c 'install.sh' CLAUDE.md; grep -c 'pre-rust' CLAUDE.md; grep -c '509d5e4' CLAUDE.md
 git ls-files '*.py' | grep -v '^specs/'; echo "py outside specs: $(git ls-files '*.py' | grep -vc '^specs/')"
 git cat-file -e 509d5e4:main.py && echo "history intact"
-git check-ignore target && echo "target ignored"; git branch --show-current; git status --porcelain | grep -vc '^?? .claude/'
+git check-ignore target && echo "target ignored"; git branch --show-current; git status --porcelain | grep -vcE '^\?\? \.claude/|^.. specs/rust-rewrite/(evidence/|results\.md)'
 ```
-- pass when: the awk prints nothing; the four greps are each at least `1`; `py outside specs: 0`; `history intact`; `target ignored`; branch `feat/rust-rewrite`; the last count is `0` (everything committed; the untracked `.claude/` directory is not part of this work).
+- pass when: the awk prints nothing; the four greps are each at least `1`; `py outside specs: 0`; `history intact`; `target ignored`; branch `feat/rust-rewrite`; the last count is `0` (everything committed; the untracked `.claude/` directory is not part of this work, and neither are this test run's own `specs/rust-rewrite/evidence/` and `results.md`, which the run rewrites).
 - fail when: CLAUDE.md still tells the next reader to run `python3 main.py` or `unittest`, the rollback recipe is missing, Python files remain, or build output is not ignored.
 
 ## Definition of done
 - [ ] Every eval above has a pass row in results.md, with evidence (the command output, and the two PNG paths for E7/E8)
-- [ ] results.md holds the 67-row Python-to-Rust test mapping table and, for E13, the failing test name for each of the fifteen mutations (ten named, five sampled)
+- [ ] results.md holds the 67-row Python-to-Rust test mapping table and, for E13, the failing test name for each of the sixteen mutations (eleven named, five sampled)
 - [ ] Nothing under "Out of scope" was built and nothing under "Must not touch" changed (`rules.lua` hash is still `0004b7328141ad28049a6b2334647a4cfbd0dad909b7fbb8b02ddf9f6ccfec1f`; `specs/rust-rewrite/{RD.md,evals.md,mockup.html,ref,harness}` untouched)
 - [ ] The project's lint and build pass: `cargo build --release --locked`, `cargo clippy --all-targets --locked -- -D warnings`, `cargo test --locked`
 - [ ] The real `rog-control.service` is running the Rust binary at the end (E21), and `git worktree remove --force $T/ref` has cleaned up the reference checkout

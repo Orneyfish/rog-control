@@ -44,3 +44,19 @@ sizeok() { local a b; a=$(magick identify -format '%w %h' "$1"); b=$(magick iden
 app() { if [ "$BASHPID" != "$$" ]; then exec env PATH="$FAKE:$PATH" HOME="${APPHOME:-$H}" "$BIN" "$@"; else env PATH="$FAKE:$PATH" HOME="${APPHOME:-$H}" "$BIN" "$@"; fi; }
 # closewin <hyprland-address>  -> closes that window like its title-bar x (Hyprland 0.57 Lua dispatcher; verified)
 closewin() { hyprctl dispatch "hl.dsp.window.close({ window = \"address:$1\" })" >/dev/null; }
+
+# D-Bus activation on a private bus (dbus-run-session) starts services such as xdg-desktop-portal-kde that
+# outlive the bus (they reparent to init, ~70 MB each). On exit of a private-bus eval script, stop every
+# process of this user whose environment carries THIS script's private bus address. Never touches the real
+# session bus (address under /run/user) and never the script's own ancestors (dbus-run-session, dbus-daemon).
+_busclean() {
+  local addr="$DBUS_SESSION_BUS_ADDRESS" p anc=" $$ " q
+  case "$addr" in ''|*/run/user/*) return 0;; esac
+  q=$$; while [ "$q" -gt 1 ] 2>/dev/null; do q=$(ps -o ppid= -p "$q" 2>/dev/null | tr -d ' '); anc="$anc$q "; done
+  for p in $(pgrep -u "$(id -u)" -f . 2>/dev/null); do
+    case "$anc" in *" $p "*) continue;; esac
+    { tr '\0' '\n' < "/proc/$p/environ" | grep -qxF "DBUS_SESSION_BUS_ADDRESS=$addr"; } 2>/dev/null && kill -TERM "$p" 2>/dev/null
+  done
+  return 0
+}
+case "$DBUS_SESSION_BUS_ADDRESS" in ''|*/run/user/*) ;; *) trap _busclean EXIT;; esac
