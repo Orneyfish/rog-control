@@ -1,4 +1,4 @@
-$ timeout 180 dbus-run-session -- bash $T/e4.sh   (verbatim from evals.md E4)
+$ timeout 180 dbus-run-session -- bash $T/e4.sh   (E4 script from evals.md)
 no service: rc=0 in 0s msg=[ROG Control service not reachable: GDBus.Error:org.freedesktop.DBus.Error.ServiceUnknown: The name com.orneyfish.RogControl.Hotkeys was not provided by any .service files]
 open rc=0
 shown
@@ -11,9 +11,16 @@ back from performance:
 asusctl profile set Balanced
 powerprofilesctl set balanced
 expect: asusctl profile set Balanced + powerprofilesctl set balanced
-/bin/sh: line 1: kill: (995647) - No such process
---- (script exits 143 because its last statement is 'wait' on the killed app; not an app error)
---- full fake log after the back cycle (shows nothing else was written; notify-send matches Python main.py:576 notify_osd):
-asusctl profile set Balanced
+rc=143
+
+--- supplementary run (same app, prints the WHOLE tool log after each cycle to show nothing else was written)
+full log after forward:
+asusctl profile set Quiet
+powerprofilesctl set power-saver
+notify-send -a ROG Control -t 2000 Performance mode Silent
+full log after back:
 powerprofilesctl set balanced
+asusctl profile set Balanced
 notify-send -a ROG Control -t 2000 Performance mode Balanced
+(/usr/lib/xdg-desktop-portal:6377): xdg-desktop-portal-WARNING **: 16:11:43.517: Failed to close session implementation: The connection is closed
+rc=0

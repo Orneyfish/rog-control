@@ -1,173 +1,341 @@
-E13 mutation check: scratch copy $T/mut = tracked files of HEAD dd6f041 (+ copied target/ for build cache); baseline 'HOME=$H PATH=$FAKE:$PATH cargo test --locked' in the copy: rc=0, 98 passed, 0 failed
-baseline output tail:
-test result: ok. 98 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 14.68s
+$ mkdir -p $T/mut && git ls-files -z | xargs -0 tar -cf - | tar -xf - -C $T/mut && cd $T/mut   (scratch copy; target/ dir reflink-copied only to save compile time)
+# per row: edit source; HOME=$H PATH=$FAKE:$PATH cargo test --locked; restore file (cp from repo + touch so cargo rebuilds)
+baseline (unedited copy): test result: ok. 104 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 16.35s
 
-Each mutation below = restore pristine src+tests, apply the edit(s) (python str.replace, asserted to match exactly once), run cargo test --locked, record failures. Edits are in /tmp/.../scratchpad/mut/muts.py:
+ROW | edit | failing test(s)
+1  | hw.rs apply_gpu_mode: 'if false && disable && external_display_on_dgpu()' | gpu_mode__refuses_to_disable_dgpu_when_external_display_attached
+2a | hw.rs: also write dgpu_disable in same call as MUX change | gpu_mode__apply_never_touches_dgpu_disable_in_same_call_as_a_mux_change, gpu_panel__mux_change_waits_for_confirmation_then_reboots_after_success, gpu_panel__failed_mux_write_toasts_and_never_reboots
+2b | hw.rs: write MUX when it is not changing ('if true') | gpu_mode__apply_never_touches_mux_when_already_correct (+4 more: refuses_to_disable..., proceeds_normally..., gpu_panel__switch_without_mux_change..., automation__gpu_optimized_guards)
+3a | panels.rs on_gpu_toggled: skip confirmation ('if false && gpu_mode_needs_reboot') | gpu_panel__mux_change_waits_for_confirmation_then_reboots_after_success, gpu_panel__declined_confirmation_changes_nothing, gpu_panel__real_dialog_blocks_until_answered, gpu_panel__failed_mux_write_toasts_and_never_reboots, gpu_panel__switch_without_mux_change_applies_at_once_and_never_reboots
+3b | panels.rs apply: 'else if reboot' -> 'else if true' (systemctl reboot without confirmation) | gpu_panel__switch_without_mux_change_applies_at_once_and_never_reboots
+4  | hw.rs nvidia_smi_pl: ok = out.ok (stdout ignored) | nvidia_smi__not_supported_text_treated_as_failure_despite_exit_zero
+5  | fans.rs: PL1 slider applies directly instead of debouncer | slider_debounce__pl1_rapid_drag_sends_one_command, fans_window__refresh_mid_debounce_keeps_every_slider_value
+6  | fans.rs drag_to: speed clamped to SPEED_MIN/MAX only, neighbour clamp removed | fan_curve_graph__drag_cannot_produce_non_monotonic_speed
+7  | fans.rs reset: 'if false && profile != active' | factory_defaults__refuses_when_edited_profile_is_not_active
+8a | fans.rs report(): failed armoury set (PL1/PL2/boost/temp) swallowed, no toast | fans_window__failed_write_toasts_and_power_mode_pairs_with_ppd
+9  | control.rs: CycleProfile uses step -1, CycleProfileBack +1 | control__cycle_methods_step_forward_and_back
+10a| config.rs save_to: write straight to config.json (no .tmp + rename) | config__save_is_atomic_and_keeps_unknown_keys
+10b| config.rs save_to: drop unknown top-level keys | config__save_is_atomic_and_keeps_unknown_keys
+11 sampled (five different Python classes, none touched by rows 1-10):
+S1 | TestApplyScreenPresetUsesEval: hw.rs apply_screen_preset position hard-coded 0x0 | screen_preset__preserves_position_and_output_name
+S2 | TestRgbDebounceAndPreservation: lighting.rs reset_to_theme no longer switches to static | rgb__reset_to_theme_switches_to_static_when_effect_has_no_colour
+S3 | TestBatteryScaleRange: panels.rs battery slider lower bound 20 -> 40 | battery_scale__range_matches_asusctl_supported_range
+S4 | TestGpuTempNoFlicker: panels.rs GpuPanel::refresh blanks last_temp to '--' | gpu_temp__refresh_never_shows_placeholder_after_first_real_reading
+S5 | TestCurrentMonitorPicksInternalPanel: hw.rs current_monitor_blocking always picks list.first() | current_monitor__picks_edp_even_when_listed_second
 
-### 1a gpu: external display guard removed (call site)
-rc=1 secs=17 compile_error=False
-FAILED tests: gpu_mode__refuses_to_disable_dgpu_when_external_display_attached
-result lines: test result: FAILED. 97 passed; 1 failed; 0 ignored; 0 measured; 0 fil
-### 1b gpu: external display never detected (detector)
-rc=1 secs=16 compile_error=False
-FAILED tests: external_display__non_edp_connected_on_nvidia_card_is_external, gpu_mode__refuses_to_disable_dgpu_when_external_display_attached
-result lines: test result: FAILED. 96 passed; 2 failed; 0 ignored; 0 measured; 0 fil
-### 2a gpu: dgpu_disable written in the same call as a MUX change
-rc=1 secs=16 compile_error=False
-FAILED tests: gpu_mode__apply_never_touches_dgpu_disable_in_same_call_as_a_mux_change, gpu_panel__failed_mux_write_toasts_and_never_reboots, gpu_panel__mux_change_waits_for_confirmation_then_reboots_after_success
-result lines: test result: FAILED. 95 passed; 3 failed; 0 ignored; 0 measured; 0 fil
-### 2b gpu: MUX written even when not changing
-rc=1 secs=15 compile_error=False
-FAILED tests: automation__gpu_optimized_guards, gpu_mode__apply_never_touches_mux_when_already_correct, gpu_mode__proceeds_normally_when_no_external_display_on_dgpu, gpu_mode__refuses_to_disable_dgpu_when_external_display_attached, gpu_panel__switch_without_mux_change_applies_at_once_and_never_reboots
-result lines: test result: FAILED. 93 passed; 5 failed; 0 ignored; 0 measured; 0 fil
-### 3a gpu: MUX change without confirmation
-rc=1 secs=15 compile_error=False
-FAILED tests: gpu_panel__declined_confirmation_changes_nothing, gpu_panel__failed_mux_write_toasts_and_never_reboots, gpu_panel__mux_change_waits_for_confirmation_then_reboots_after_success, gpu_panel__real_dialog_blocks_until_answered
-result lines: test result: FAILED. 94 passed; 4 failed; 0 ignored; 0 measured; 0 fil
-### 3b gpu: systemctl reboot without confirmation
-rc=1 secs=16 compile_error=False
-FAILED tests: gpu_panel__switch_without_mux_change_applies_at_once_and_never_reboots
-result lines: test result: FAILED. 97 passed; 1 failed; 0 ignored; 0 measured; 0 fil
-### 4 nvidia: -pl exit code 0 trusted as success
-rc=1 secs=15 compile_error=False
-FAILED tests: nvidia_smi__not_supported_text_treated_as_failure_despite_exit_zero
-result lines: test result: FAILED. 97 passed; 1 failed; 0 ignored; 0 measured; 0 fil
-### 5 debounce: PL1 applied directly on every value-changed
-rc=1 secs=16 compile_error=False
-FAILED tests: slider_debounce__pl1_rapid_drag_sends_one_command
-result lines: test result: FAILED. 97 passed; 1 failed; 0 ignored; 0 measured; 0 fil
-### 6 fan curve: monotonic speed clamp removed
-rc=1 secs=16 compile_error=False
-FAILED tests: fan_curve_graph__drag_cannot_produce_non_monotonic_speed
-result lines: test result: FAILED. 97 passed; 1 failed; 0 ignored; 0 measured; 0 fil
-### 7 fan curve: Factory Defaults allowed for a non-active profile
-rc=1 secs=16 compile_error=False
-FAILED tests: factory_defaults__refuses_when_edited_profile_is_not_active
-result lines: test result: FAILED. 97 passed; 1 failed; 0 ignored; 0 measured; 0 fil
-### 8a errors: failed asusctl armoury set swallowed (fans/power limits)
-rc=1 secs=15 compile_error=False
-FAILED tests: fans_window__failed_write_toasts_and_power_mode_pairs_with_ppd
-result lines: test result: FAILED. 97 passed; 1 failed; 0 ignored; 0 measured; 0 fil
-### 8b errors: failed asusctl armoury set swallowed (extra window boot sound + charge mode)
-rc=1 secs=15 compile_error=False
-FAILED tests: extra_window__controls_send_armoury_commands_and_failures_toast
-result lines: test result: FAILED. 97 passed; 1 failed; 0 ignored; 0 measured; 0 fil
-### 8c errors: failed asusctl armoury set swallowed (GPU panel)
-rc=1 secs=15 compile_error=False
-FAILED tests: gpu_panel__failed_mux_write_toasts_and_never_reboots
-result lines: test result: FAILED. 97 passed; 1 failed; 0 ignored; 0 measured; 0 fil
-### 9a cycling: forward/backward swapped (control wiring)
-rc=1 secs=16 compile_error=False
-FAILED tests: control__cycle_methods_step_forward_and_back
-result lines: test result: FAILED. 97 passed; 1 failed; 0 ignored; 0 measured; 0 fil
-### 9b cycling: step direction inverted in cycle_target
-rc=1 secs=15 compile_error=False
-FAILED tests: profile_cycle__direction_and_wrap
-result lines: test result: FAILED. 97 passed; 1 failed; 0 ignored; 0 measured; 0 fil
-### 10a config: save without temp-file-and-rename
-rc=1 secs=16 compile_error=False
-FAILED tests: config__save_is_atomic_and_keeps_unknown_keys
-result lines: test result: FAILED. 97 passed; 1 failed; 0 ignored; 0 measured; 0 fil
-### 10b config: unknown keys dropped on load/save
-rc=1 secs=16 compile_error=False
-FAILED tests: config__save_is_atomic_and_keeps_unknown_keys
-result lines: test result: FAILED. 97 passed; 1 failed; 0 ignored; 0 measured; 0 fil
-### 11a sample TestApplyScreenPresetUsesEval: monitor position not preserved
-rc=1 secs=16 compile_error=False
-FAILED tests: screen_preset__preserves_position_and_output_name
-result lines: test result: FAILED. 97 passed; 1 failed; 0 ignored; 0 measured; 0 fil
-### 11b sample TestRgbDebounceAndPreservation: reset-to-theme no longer switches to static
-rc=1 secs=16 compile_error=False
-FAILED tests: rgb__reset_to_theme_switches_to_static_when_effect_has_no_colour
-result lines: test result: FAILED. 97 passed; 1 failed; 0 ignored; 0 measured; 0 fil
-### 11c sample TestBatteryScaleRange: slider min 20 -> 40
-rc=1 secs=15 compile_error=False
-FAILED tests: battery_scale__range_matches_asusctl_supported_range
-result lines: test result: FAILED. 97 passed; 1 failed; 0 ignored; 0 measured; 0 fil
-### 11d sample TestWidgetConstruction.test_startup_panel: enable/disable verb swapped
-rc=1 secs=15 compile_error=False
-FAILED tests: startup_panel__switch_runs_enable_and_disable
-result lines: test result: FAILED. 97 passed; 1 failed; 0 ignored; 0 measured; 0 fil
-### 11e sample TestGpuTempNoFlicker: refresh blanks temperature to placeholder
-rc=1 secs=14 compile_error=False
-FAILED tests: gpu_temp__refresh_never_shows_placeholder_after_first_real_reading
-result lines: test result: FAILED. 97 passed; 1 failed; 0 ignored; 0 measured; 0 fil
-RESTORED
+SUPPLEMENTARY edits on sibling spots of row 8 (NOT part of the 15 prescribed edits):
+8b | extra.rs charge_mode 'asusctl armoury set charge_mode' failure toast swallowed | NONE: 'test result: ok. 104 passed; 0 failed' (UNGUARDED)
+8c | extra.rs boot_sound failure toast swallowed | extra_window__controls_send_armoury_commands_and_failures_toast (guarded)
+8d | panels.rs report_cb (used by Performance profile, Screen preset incl. 'asusctl armoury set panel_overdrive', Keyboard level, Startup toggle) failure toast swallowed | NONE: 'test result: ok. 104 passed; 0 failed' (UNGUARDED)
 
-Copy restored afterwards: identical to pristine.
+final: scratch copy src/tests/Cargo.* byte-identical to repo after all restores; unedited cargo test: test result: ok. 104 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 16.35s
 
---- the exact edits:
-# (label, [(file, old, new), ...])
-M = []
-def add(label, *edits): M.append((label, list(edits)))
-
-add("1a gpu: external display guard removed (call site)",
-    ("src/hw.rs", "if disable && external_display_on_dgpu() {", "if disable && false && external_display_on_dgpu() {"))
-add("1b gpu: external display never detected (detector)",
-    ("src/hw.rs", 'if read_sysfs(Some(&format!("{base}/{entry}/status"))).as_deref() == Some("connected") {', "if false {"))
-add("2a gpu: dgpu_disable written in the same call as a MUX change",
-    ("src/hw.rs", 'run_cmd(&["asusctl", "armoury", "set", "gpu_mux_mode", &target.to_string()], on_done);\n        return;', 'run_cmd(&["asusctl", "armoury", "set", "gpu_mux_mode", &target.to_string()], None);'))
-add("2b gpu: MUX written even when not changing",
-    ("src/hw.rs", "if read_sysfs_int(Some(GPU_MUX_PATH)) != Some(target) {", "if true {"))
-add("3a gpu: MUX change without confirmation",
-    ("src/panels.rs", "if gpu_mode_needs_reboot(name) {", "if false && gpu_mode_needs_reboot(name) {"))
-add("3b gpu: systemctl reboot without confirmation",
-    ("src/panels.rs", "} else {\n            self.apply(name, false);", "} else {\n            self.apply(name, true);"))
-add("4 nvidia: -pl exit code 0 trusted as success",
-    ("src/hw.rs", 'let ok = out.ok && !out.stdout.to_lowercase().contains("not supported");', "let ok = out.ok;"))
-add("5 debounce: PL1 applied directly on every value-changed",
-    ("src/fans.rs", "s.debouncers[idx].trigger();", "if idx == D_PL1 { apply(&s); } else { s.debouncers[idx].trigger(); }"))
-add("6 fan curve: monotonic speed clamp removed",
-    ("src/fans.rs", "let speed = speed_lo.max(speed_hi.min(py_round(speed) as i32));", "let speed = SPEED_MIN.max(SPEED_MAX.min(py_round(speed) as i32));"))
-add("7 fan curve: Factory Defaults allowed for a non-active profile",
-    ("src/fans.rs", "if profile != active {", "if false && profile != active {"))
-add("8a errors: failed asusctl armoury set swallowed (fans/power limits)",
-    ("src/fans.rs", 'toast(&failure_text("Command failed", &err));', "let _ = (&toast, &err);"))
-add("8b errors: failed asusctl armoury set swallowed (extra window boot sound + charge mode)",
-    ("src/extra.rs", '                        if !ok {\n                            toast(&failure_text("Command failed", &err));\n                        }', "                        let _ = (&ok, &toast, &err);"),
-    ("src/extra.rs", '                if !ok {\n                    toast(&failure_text("Command failed", &err));\n                }', "                let _ = (&ok, &toast, &err);"))
-add("8c errors: failed asusctl armoury set swallowed (GPU panel)",
-    ("src/panels.rs", '(s.toast)(&failure_text("GPU mode failed", &err));', "let _ = &err;"))
-add("9a cycling: forward/backward swapped (control wiring)",
-    ("src/control.rs", "cycle: Box::new(move || cycle_step(1)),", "cycle: Box::new(move || cycle_step(-1)),"),
-    ("src/control.rs", "cycle_back: Box::new(move || back(-1)),", "cycle_back: Box::new(move || back(1)),"))
-add("9b cycling: step direction inverted in cycle_target",
-    ("src/hw.rs", "PROFILES[(idx + step).rem_euclid(", "PROFILES[(idx - step).rem_euclid("))
-add("10a config: save without temp-file-and-rename",
-    ("src/config.rs", '''    let mut tmp = path.as_os_str().to_owned();
-    tmp.push(".tmp");
-    let tmp = PathBuf::from(tmp);
-    let text = serde_json::to_string_pretty(cfg).map_err(std::io::Error::other)?;
-    let mut f = std::fs::File::create(&tmp)?;
-    f.write_all(text.as_bytes())?;
-    f.sync_all()?;
-    drop(f);
-    std::fs::rename(&tmp, path)''', '''    let text = serde_json::to_string_pretty(cfg).map_err(std::io::Error::other)?;
-    std::fs::write(path, text.as_bytes())'''))
-add("10b config: unknown keys dropped on load/save",
-    ("src/config.rs", "    Value::Object(cfg)\n}\n\n/// A missing or corrupt", "    if let Value::Object(defs) = defaults {\n        cfg.retain(|k, _| defs.contains_key(k));\n    }\n    Value::Object(cfg)\n}\n\n/// A missing or corrupt"))
-add("11a sample TestApplyScreenPresetUsesEval: monitor position not preserved",
-    ("src/hw.rs", 'monitor["width"], monitor["height"], monitor["x"], monitor["y"], monitor["scale"]', 'monitor["width"], monitor["height"], 0, 0, monitor["scale"]'))
-add("11b sample TestRgbDebounceAndPreservation: reset-to-theme no longer switches to static",
-    ("src/lighting.rs", 'if !effect_needs(self.current_effect()).contains(&"colour1") {', 'if false && !effect_needs(self.current_effect()).contains(&"colour1") {'))
-add("11c sample TestBatteryScaleRange: slider min 20 -> 40",
-    ("src/panels.rs", "gtk::Scale::with_range(gtk::Orientation::Horizontal, 20.0, 100.0, 5.0)", "gtk::Scale::with_range(gtk::Orientation::Horizontal, 40.0, 100.0, 5.0)"))
-add("11d sample TestWidgetConstruction.test_startup_panel: enable/disable verb swapped",
-    ("src/panels.rs", 'let verb = if state { "enable" } else { "disable" };', 'let verb = if state { "disable" } else { "enable" };'))
-add("11e sample TestGpuTempNoFlicker: refresh blanks temperature to placeholder",
-    ("src/panels.rs", "            self.update_stat_label();\n        });\n        self.refresh_gpu_temp();", '            *self.last_temp.borrow_mut() = "--".to_string();\n            self.update_stat_label();\n        });\n        self.refresh_gpu_temp();'))
-
-=== additional sampled mutations (run afterwards with the same runner) ===
-### 11d2 sample TestWidgetConstruction.test_startup_panel (its own claim): switch no longer mirrors is-enabled
-rc=1 secs=15 compile_error=False
-FAILED tests: startup_panel__switch_runs_enable_and_disable, widget_construction__startup_panel
-result lines: test result: FAILED. 96 passed; 2 failed; 0 ignored; 0 measured; 0 fil
-### 11f sample TestAuraModeMapping: two effects share an index (maps not exact inverses)
-rc=1 secs=16 compile_error=False
-FAILED tests: aura_mode_mapping__index_maps_are_exact_inverses
-result lines: test result: FAILED. 97 passed; 1 failed; 0 ignored; 0 measured; 0 fil
-### 11g sample TestHwmonResolution: CPU temp sensor resolved from the wrong driver name
-rc=1 secs=15 compile_error=False
-FAILED tests: hwmon_resolution__cpu_temp_path_is_coretemp_not_hardcoded
-result lines: test result: FAILED. 97 passed; 1 failed; 0 ignored; 0 measured; 0 fil
-RESTORED
+================ raw logs (diff of each edit + cargo test result lines) ================
+=== M2a: edited src/hw.rs
+321c321,322
+<         run_cmd(&["asusctl", "armoury", "set", "gpu_mux_mode", &target.to_string()], on_done);
+---
+>         run_cmd(&["asusctl", "armoury", "set", "gpu_mux_mode", &target.to_string()], None);
+>         run_cmd(&["asusctl", "armoury", "set", "dgpu_disable", "1"], on_done);
+cargo rc=1
+error: test failed, to rerun pass `--test e2e`
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+FAILED TEST: gpu_mode__apply_never_touches_dgpu_disable_in_same_call_as_a_mux_change
+FAILED TEST: gpu_panel__mux_change_waits_for_confirmation_then_reboots_after_success
+FAILED TEST: gpu_panel__failed_mux_write_toasts_and_never_reboots
+test result: FAILED. 101 passed; 3 failed; 0 ignored; 0 measured; 0 filtered out; finished in 16.30s
+test result: FAILED. 101 passed; 3 failed; 0 ignored; 0 measured; 0 filtered out; finished in 16.30s
+=== restored src/hw.rs
+restored-identical
+=== M2b: edited src/hw.rs
+320c320
+<     if read_sysfs_int(Some(GPU_MUX_PATH)) != Some(target) {
+---
+>     if true {
+cargo rc=1
+error: test failed, to rerun pass `--test e2e`
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+FAILED TEST: gpu_mode__apply_never_touches_mux_when_already_correct
+FAILED TEST: gpu_mode__refuses_to_disable_dgpu_when_external_display_attached
+FAILED TEST: gpu_mode__proceeds_normally_when_no_external_display_on_dgpu
+FAILED TEST: gpu_panel__switch_without_mux_change_applies_at_once_and_never_reboots
+FAILED TEST: automation__gpu_optimized_guards
+test result: FAILED. 99 passed; 5 failed; 0 ignored; 0 measured; 0 filtered out; finished in 15.76s
+test result: FAILED. 99 passed; 5 failed; 0 ignored; 0 measured; 0 filtered out; finished in 15.76s
+=== restored src/hw.rs
+restored-identical
+=== M3a: edited src/panels.rs
+260c260
+<         if gpu_mode_needs_reboot(name) {
+---
+>         if false && gpu_mode_needs_reboot(name) {
+cargo rc=1
+error: test failed, to rerun pass `--test e2e`
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+FAILED TEST: gpu_panel__mux_change_waits_for_confirmation_then_reboots_after_success
+FAILED TEST: gpu_panel__declined_confirmation_changes_nothing
+FAILED TEST: gpu_panel__real_dialog_blocks_until_answered
+FAILED TEST: gpu_panel__failed_mux_write_toasts_and_never_reboots
+FAILED TEST: gpu_panel__switch_without_mux_change_applies_at_once_and_never_reboots
+test result: FAILED. 99 passed; 5 failed; 0 ignored; 0 measured; 0 filtered out; finished in 15.14s
+test result: FAILED. 99 passed; 5 failed; 0 ignored; 0 measured; 0 filtered out; finished in 15.14s
+=== restored src/panels.rs
+restored-identical
+=== M3b: edited src/panels.rs
+296c296
+<                 } else if reboot {
+---
+>                 } else if true {
+cargo rc=1
+error: test failed, to rerun pass `--test e2e`
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+FAILED TEST: gpu_panel__switch_without_mux_change_applies_at_once_and_never_reboots
+test result: FAILED. 103 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 16.37s
+test result: FAILED. 103 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 16.37s
+=== restored src/panels.rs
+restored-identical
+=== M4: edited src/hw.rs
+449c449
+<             let ok = out.ok && !out.stdout.to_lowercase().contains("not supported");
+---
+>             let ok = out.ok;
+cargo rc=1
+error: test failed, to rerun pass `--test e2e`
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+FAILED TEST: nvidia_smi__not_supported_text_treated_as_failure_despite_exit_zero
+test result: FAILED. 103 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 16.38s
+test result: FAILED. 103 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 16.38s
+=== restored src/hw.rs
+restored-identical
+=== M5: edited src/fans.rs
+781c781
+<                         s.debouncers[idx].trigger();
+---
+>                         if idx == D_PL1 { apply(&s); } else { s.debouncers[idx].trigger(); }
+cargo rc=1
+error: test failed, to rerun pass `--test e2e`
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+FAILED TEST: slider_debounce__pl1_rapid_drag_sends_one_command
+FAILED TEST: fans_window__refresh_mid_debounce_keeps_every_slider_value
+test result: FAILED. 102 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 15.92s
+test result: FAILED. 102 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 15.92s
+=== restored src/fans.rs
+restored-identical
+ALLDONE
+=== M6: edited src/fans.rs
+153c153,154
+<             let speed = speed_lo.max(speed_hi.min(py_round(speed) as i32));
+---
+>             let _ = (speed_lo, speed_hi);
+>             let speed = SPEED_MIN.max(SPEED_MAX.min(py_round(speed) as i32));
+cargo rc=1
+error: test failed, to rerun pass `--test e2e`
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+FAILED TEST: fan_curve_graph__drag_cannot_produce_non_monotonic_speed
+test result: FAILED. 103 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 16.37s
+test result: FAILED. 103 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 16.37s
+=== restored src/fans.rs
+restored-identical
+=== M7: edited src/fans.rs
+445c445
+<         if profile != active {
+---
+>         if false && profile != active {
+cargo rc=1
+error: test failed, to rerun pass `--test e2e`
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+FAILED TEST: factory_defaults__refuses_when_edited_profile_is_not_active
+test result: FAILED. 103 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 16.37s
+test result: FAILED. 103 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 16.37s
+=== restored src/fans.rs
+restored-identical
+=== M8a: edited src/fans.rs
+938,940c938
+<             if !ok {
+<                 toast(&failure_text("Command failed", &err));
+<             }
+---
+>             let _ = (ok, &err, &toast);
+cargo rc=1
+error: test failed, to rerun pass `--test e2e`
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+FAILED TEST: fans_window__failed_write_toasts_and_power_mode_pairs_with_ppd
+test result: FAILED. 103 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 16.20s
+test result: FAILED. 103 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 16.20s
+=== restored src/fans.rs
+restored-identical
+=== M8b: edited src/extra.rs
+135,137c135
+<                 if !ok {
+<                     toast(&failure_text("Command failed", &err));
+<                 }
+---
+>                 let _ = (ok, &err, &toast);
+cargo rc=0
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 104 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 16.34s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+=== restored src/extra.rs
+restored-identical
+=== M9: edited src/control.rs
+52,53c52,53
+<             cycle: Box::new(move || cycle_step(1)),
+<             cycle_back: Box::new(move || back(-1)),
+---
+>             cycle: Box::new(move || cycle_step(-1)),
+>             cycle_back: Box::new(move || back(1)),
+cargo rc=1
+error: test failed, to rerun pass `--test e2e`
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+FAILED TEST: control__cycle_methods_step_forward_and_back
+test result: FAILED. 103 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 16.37s
+test result: FAILED. 103 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 16.37s
+=== restored src/control.rs
+restored-identical
+=== M10a: edited src/config.rs
+114,118c114,115
+<     let mut f = std::fs::File::create(&tmp)?;
+<     f.write_all(text.as_bytes())?;
+<     f.sync_all()?;
+<     drop(f);
+<     std::fs::rename(&tmp, path)
+---
+>     let _ = &tmp;
+>     std::fs::write(path, text.as_bytes())
+cargo rc=1
+error: test failed, to rerun pass `--test e2e`
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+FAILED TEST: config__save_is_atomic_and_keeps_unknown_keys
+test result: FAILED. 103 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 16.34s
+test result: FAILED. 103 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 16.34s
+=== restored src/config.rs
+restored-identical
+=== M10b: edited src/config.rs
+113c113,114
+<     let text = serde_json::to_string_pretty(cfg).map_err(std::io::Error::other)?;
+---
+>     let kept: Value = Value::Object(cfg.as_object().map(|m| m.iter().filter(|(k, _)| *k == "automation" || *k == "power_limits").map(|(k, v)| (k.clone(), v.clone())).collect()).unwrap_or_default());
+>     let text = serde_json::to_string_pretty(&kept).map_err(std::io::Error::other)?;
+cargo rc=1
+error: test failed, to rerun pass `--test e2e`
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+FAILED TEST: config__save_is_atomic_and_keeps_unknown_keys
+test result: FAILED. 103 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 16.33s
+test result: FAILED. 103 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 16.33s
+=== restored src/config.rs
+restored-identical
+ALLDONE
+=== S1: edited src/hw.rs
+650c650
+<             monitor["width"], monitor["height"], monitor["x"], monitor["y"], monitor["scale"]
+---
+>             monitor["width"], monitor["height"], 0, 0, monitor["scale"]
+cargo rc=1
+error: test failed, to rerun pass `--test e2e`
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+FAILED TEST: screen_preset__preserves_position_and_output_name
+test result: FAILED. 103 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 16.31s
+test result: FAILED. 103 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 16.31s
+=== restored src/hw.rs
+restored-identical
+=== S2: edited src/lighting.rs
+191c191
+<         if !effect_needs(self.current_effect()).contains(&"colour1") {
+---
+>         if false && !effect_needs(self.current_effect()).contains(&"colour1") {
+cargo rc=1
+error: test failed, to rerun pass `--test e2e`
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+FAILED TEST: rgb__reset_to_theme_switches_to_static_when_effect_has_no_colour
+test result: FAILED. 103 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 16.39s
+test result: FAILED. 103 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 16.39s
+=== restored src/lighting.rs
+restored-identical
+=== S3: edited src/panels.rs
+611c611
+<         let scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, 20.0, 100.0, 5.0);
+---
+>         let scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, 40.0, 100.0, 5.0);
+cargo rc=1
+error: test failed, to rerun pass `--test e2e`
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+FAILED TEST: battery_scale__range_matches_asusctl_supported_range
+test result: FAILED. 103 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 16.39s
+test result: FAILED. 103 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 16.39s
+=== restored src/panels.rs
+restored-identical
+=== S4: edited src/panels.rs
+228a229
+>             *self.last_temp.borrow_mut() = "--".to_string();
+cargo rc=1
+error: test failed, to rerun pass `--test e2e`
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+FAILED TEST: gpu_temp__refresh_never_shows_placeholder_after_first_real_reading
+test result: FAILED. 103 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 15.18s
+test result: FAILED. 103 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 15.18s
+=== restored src/panels.rs
+restored-identical
+=== S5: edited src/hw.rs
+610c610,611
+<     internal.or_else(|| list.first()).cloned()
+---
+>     let _ = internal;
+>     list.first().cloned()
+cargo rc=1
+error: test failed, to rerun pass `--test e2e`
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+FAILED TEST: current_monitor__picks_edp_even_when_listed_second
+test result: FAILED. 103 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 16.37s
+test result: FAILED. 103 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 16.37s
+=== restored src/hw.rs
+restored-identical
+ALLDONE
+=== M8c: edited src/extra.rs
+52,54c52
+<                         if !ok {
+<                             toast(&failure_text("Command failed", &err));
+<                         }
+---
+>                         let _ = (ok, &err, &toast);
+cargo rc=1
+error: test failed, to rerun pass `--test e2e`
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+FAILED TEST: extra_window__controls_send_armoury_commands_and_failures_toast
+test result: FAILED. 103 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 16.31s
+test result: FAILED. 103 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 16.31s
+=== restored src/extra.rs
+restored-identical
+=== M8d: edited src/panels.rs
+34,36c34
+<         if !ok {
+<             toast(&failure_text("Command failed", &err));
+<         }
+---
+>         let _ = (ok, &err, &toast);
+cargo rc=0
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 104 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 16.35s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+=== restored src/panels.rs
+restored-identical
+ALLDONE

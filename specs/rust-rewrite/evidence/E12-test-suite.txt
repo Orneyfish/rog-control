@@ -1,18 +1,32 @@
-$ E12 check, run from repo root (HOME=$H PATH=$FAKE:$PATH cargo test --locked)
+$ E12 check script (python names from git show 509d5e4:tests/test_e2e.py; HOME=$H PATH=$FAKE:$PATH cargo test --locked)
 python tests: 67   ported: 67
 names identical
---- cargo test result lines:
-     Running unittests src/lib.rs (target/debug/deps/rog_control-c0ca6eb106630b66)
+cargo test rc=0
+...
+all test result lines:
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
-     Running unittests src/main.rs (target/debug/deps/rog_control-2154af53ad5bc0b4)
+test result: ok. 104 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 16.40s
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
-     Running tests/e2e.rs (target/debug/deps/e2e-d660e107e626ebb3)
-test result: ok. 98 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 14.70s
-   Doc-tests rog_control
-test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
-sum of passed = 98 (>= 67); 0 failed; 0 ignored; '#[ignore]' occurrences in src/ tests/: 0; trivially empty tests: none (smallest ported test body is 5 lines with asserts)
 non-read tool calls during tests:
-(empty list above; 57 read-only calls logged)
+(end list)
 /home/orneyfish/.config/rog-control/config.json: OK
 movewindowpixel count: 0
-test-run footer: '(7 write commands were swallowed by the fail-closed guard)'
+total tool calls logged: 66
+per-test ok lines in cargo output: 102; SKIPPED lines: 0; #[ignore] attrs in src/tests: 0
+--- last 15 lines of cargo test output:
+test aura__led_mode_data_and_effect_commands ... ok
+test helpers__python_compatible_rounding_and_formatting ... ok
+test battery_text__charging_and_health ... ok
+test theme__filters_only_known_environment_noise ... ok
+
+(9 write commands were swallowed by the fail-closed guard)
+
+test result: ok. 104 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 16.40s
+
+   Doc-tests rog_control
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

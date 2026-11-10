@@ -1,13 +1,26 @@
-$ timeout 180 dbus-run-session -- bash $T/e5.sh   (verbatim from evals.md E5)
-launch 1 rc=0 in 22 ms
-launch 2 rc=0 in 1249 ms
-launch 3 rc=0 in 20 ms
+$ timeout 180 dbus-run-session -- bash $T/e5.sh   (E5 script from evals.md)
+launch 1 rc=0 in 18 ms
+launch 2 rc=0 in 580 ms
+launch 3 rc=0 in 29 ms
 launch 4 rc=0 in 20 ms
-launch 5 rc=0 in 17 ms
+launch 5 rc=0 in 19 ms
 launch 6 rc=0 in 20 ms
-launch 7 rc=0 in 19 ms
-launch 8 rc=0 in 19 ms
+launch 7 rc=0 in 28 ms
+launch 8 rc=0 in 22 ms
 processes: 1
 first instance alive
 still answers
-/bin/sh: line 1: kill: (996286) - No such process
+rc=143
+--- e5.err:
+
+(rog-control:6707): Gtk-CRITICAL **: 16:11:56.602: Unable to register the application: GDBus.Error:org.freedesktop.DBus.Error.NameHasNoOwner: Could not activate remote peer 'org.a11y.atspi.Registry': unit failed
+
+(rog-control:6707): Gtk-CRITICAL **: 16:11:56.610: Unable to register the application: GDBus.Error:org.freedesktop.DBus.Error.NameHasNoOwner: Could not activate remote peer 'org.a11y.atspi.Registry': unit failed
+
+(rog-control:6707): Gdk-WARNING **: 16:11:56.642: (../gtk/gdk/gdkframetimings.c:443):gdk_frame_timings_throttling_hint: runtime check failed: (self->result != GDK_FRAME_PREPARING)
+
+(rog-control:6707): Gtk-CRITICAL **: 16:11:56.651: Unable to register the application: GDBus.Error:org.freedesktop.DBus.Error.NameHasNoOwner: Could not activate remote peer 'org.a11y.atspi.Registry': unit failed
+
+(rog-control:6707): Gdk-WARNING **: 16:11:56.692: (../gtk/gdk/gdkframetimings.c:443):gdk_frame_timings_throttling_hint: runtime check failed: (self->result != GDK_FRAME_PREPARING)
+
+(rog-control:6707): Gtk-CRITICAL **: 16:11:56.698: Unable to register the application: GDBus.Error:org.freedesktop.DBus.Error.NameHasNoOwner: Could not activate remote peer 'org.a11y.atspi.Registry': unit failed

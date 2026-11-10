@@ -1,34 +1,49 @@
 # Results: rust-rewrite
-**Updated:** 2026-11-10 07:08:03Z
-**Review:** open: 9
+**Updated:** 2026-11-10 11:06:44Z
+**Review:** open: 8 (4 new minor F10-F13; F2, F5, F8, F9 await user decisions)
 
 | eval | result | evidence |
 |------|--------|----------|
-| E1 | pass | evidence/E1-build.txt: build rc=0, ELF PIE, libpython links 0, Cargo.lock tracked, clippy -D warnings rc=0, async/python deps 0 |
-| E2 | pass | evidence/E2-startup.txt: ready in 1222/1072/1088 ms, no window at boot, methods .CycleProfile .CycleProfileBack .Open .OpenWindow, stdout 0 bytes, panics 0 |
-| E3 | pass | evidence/E3-hostile-env.txt: corrupt config left untouched, runs with no tools, answers while tools hang, window within 2 s, panics 0 |
-| E4 | pass | evidence/E4-flags.txt: no service -> rc=0 with 'ROG Control service not reachable'; open shown/hidden; forward set Quiet+power-saver, back set Balanced+balanced |
+| E1 | pass | evidence/E1-build.txt: build ok, ELF PIE, libpython links 0, Cargo.lock tracked, clippy -D warnings rc=0, async deps 0; installed binary byte-identical to target/release |
+| E2 | pass | evidence/E2-startup.txt: ready in 589/464/438 ms, no window at boot, methods .CycleProfile .CycleProfileBack .Open .OpenWindow, stdout 0 bytes, panics 0 |
+| E3 | pass | evidence/E3-hostile-env.txt: corrupt config untouched, runs with no tools, answers while tools hang, panics 0 |
+| E4 | pass | evidence/E4-flags.txt: no service -> rc=0 with 'ROG Control service not reachable'; open shown/hidden; forward Quiet+power-saver, back Balanced+balanced |
 | E5 | pass | evidence/E5-launcher.txt: 8 launches rc=0, processes: 1, first instance alive and answering |
-| E6 | pass | evidence/E6-tray.txt: late watcher found (:1.3/StatusNotifierItem), properties correct, Activate toggles, scroll logs asusctl profile set Quiet, exits on SecondaryActivate |
-| E7 | pass | evidence/E7-main-window.txt: 494x913 both, images evidence/E7-main-window-rust.png and evidence/E7-main-window-python-ref-live.png;, imgsame 0.0010 0.0017 look-ok, stderr offenders 0 |
-| E8 | pass | evidence/E8-companions.txt: each opens once (images evidence/E8-fans-and-power.png evidence/E8-keyboard-lighting.png evidence/E8-extra.png), look-ok, sizes 560x760/380x480/453x320, x=40; main close hides |
+| E6 | pass | evidence/E6-tray.txt: late watcher found, properties correct, Activate toggles, scroll logs asusctl profile set Quiet, exits on SecondaryActivate |
+| E7 | pass | evidence/E7-main-window.txt: 494x913 both, imgsame 0.0005 0.0011 look-ok, stderr offenders 0; images evidence/E7-main-window-rust.png and evidence/E7-main-window-python-ref-live.png |
+| E8 | pass | evidence/E8-companions.txt: each opens once, look-ok 0.0000 0.0000, sizes 560x760/380x480/453x320, x=40; main close hides; images evidence/E8-fans-and-power.png evidence/E8-keyboard-lighting.png evidence/E8-extra.png |
 | E9 | pass | evidence/E9-hostile-dbus.txt: 7 bad calls rc=1 with D-Bus errors, 20 concurrent cycles -> 20 writes, alive after 50 Open calls, panics 0 |
-| E10 | pass | evidence/E10-polling.txt: hidden 10 s tool calls=0 cpu ticks=1; visible 6 s temperature polls=3; hidden again 0 |
+| E10 | pass | evidence/E10-polling.txt: hidden 10 s tool calls=0 cpu ticks=0; visible 6 s temperature polls=3; hidden again 0 |
 | E11 | pass | evidence/E11-automation-parity.txt: Python and Rust startup command sets identical (6 lines, writes: 5), config untouched |
-| E12 | pass | evidence/E12-test-suite.txt: python tests 67, ported 67, names identical; cargo test 98 passed 0 failed; non-read tool calls: none; real config hash OK |
-| E13 | pass | evidence/E13-mutation-check.txt: baseline 98 passed; every mutation (rows 1-11, plus extra samples) produced at least one FAILED test |
-| E14 | pass | evidence/E14-install.txt: clean-home install rc=0, unit/desktop differ only in exec path, icons present, systemctl calls daemon-reload,enable,restart |
+| E12 | pass | evidence/E12-test-suite.txt: python tests 67 ported 67 names identical; 105 passed 0 failed 0 ignored (no SKIPPED); non-read tool calls: none; real config hash OK |
+| E13 | pass | evidence/E13-mutation-check.txt: baseline 104 passed; every prescribed edit failed at least one test (see list below). Tester gap note: two sibling edits to the row-8 rule survived (src/extra.rs on_charge_mode_toggled; src/panels.rs report_cb), so those toast paths are unguarded |
+| E14 | pass | evidence/E14-install.txt: clean-from-scratch build 31 s, install rc=0, unit/desktop differ only in exec path, systemctl daemon-reload,enable,restart in order, --no-enable 0 calls |
 | E15 | pass | evidence/E15-checkout-gone.txt: installed binary and tray icon work with the checkout moved away |
 | E16 | pass | evidence/E16-idempotent.txt: second install changed nothing, backups exact and never overwritten |
 | E17 | pass | evidence/E17-failed-build-prereqs.txt: failed build and missing prerequisites change nothing and name what is missing |
 | E18 | pass | evidence/E18-uninstall.txt: uninstall removes only installed files, leaves .pre-rust backups, second uninstall rc=0 |
 | E19 | pass | evidence/E19-keybinds.txt: reverse-edit hash matches original, 108 lines, 4 binds as required, lua parses, configerrors [] |
-| E20 | fail | evidence/E20-hardware-unchanged.txt: diff hw.before hw.after differs on one line: eDP-1 refreshRate 240.00301 -> 60.00000 (likely E19's `hyprctl reload` re-applying the compositor monitor rule; back to 240 after E21 restarted the service). All other hardware lines and the real config hash match. |
+| E20 | fail | evidence/E20-hardware-unchanged.txt: diff differs on one line: eDP-1 refreshRate 240.00301 -> 60.00000 after E19's `hyprctl reload` re-applied the compositor monitor rule (mode preferred); back to 240 after E21 restarted the service. All other hardware lines and the real config hash match. |
 | E21 | pass | evidence/E21-real-deployment.txt: service active on ~/.local/bin/rog-control, python processes 0, rog-control processes 1, both keybinds and the launcher open/close the window, journal panics 0 |
-| E22 | fail | evidence/E22-docs-python.txt: py outside specs: 4 (config.py main.py tests/__init__.py tests/test_e2e.py); git status not clean (RD.md, harness/lib.sh modified, evidence/ untracked); CLAUDE.md, history, target-ignore and branch checks OK |
+| E22 | fail | evidence/E22-docs-python.txt: only the last count fails (30, expected 0): 30 tracked files under specs/rust-rewrite/evidence/ were modified by the test run itself. py outside specs 0, history intact, target ignored, branch OK, CLAUDE.md checks OK, 0 dirty paths outside evidence/ |
 
-## Round 1 notes
-Tester: super-agents:tester at HEAD dd6f041. The tester's wording is copied above; E20 and E22 are FAIL as the tester reported them.
+## Round 2 notes
+Tester: super-agents:tester at HEAD 7d7249e (round 2, full run). E20 and E22 are FAIL as the tester reported them.
+
+## E13 mutation list (round 2, tester)
+1: gpu_mode__refuses_to_disable_dgpu_when_external_display_attached
+2a: gpu_mode__apply_never_touches_dgpu_disable_in_same_call_as_a_mux_change (+2)
+2b: gpu_mode__apply_never_touches_mux_when_already_correct (+4)
+3a: gpu_panel__mux_change_waits_for_confirmation_then_reboots_after_success (+4)
+3b: gpu_panel__switch_without_mux_change_applies_at_once_and_never_reboots
+4: nvidia_smi__not_supported_text_treated_as_failure_despite_exit_zero
+5: slider_debounce__pl1_rapid_drag_sends_one_command; fans_window__refresh_mid_debounce_keeps_every_slider_value
+6: fan_curve_graph__drag_cannot_produce_non_monotonic_speed
+7: factory_defaults__refuses_when_edited_profile_is_not_active
+8a: fans_window__failed_write_toasts_and_power_mode_pairs_with_ppd
+9: control__cycle_methods_step_forward_and_back
+10a/10b: config__save_is_atomic_and_keeps_unknown_keys
+11: screen_preset__preserves_position_and_output_name; rgb__reset_to_theme_switches_to_static_when_effect_has_no_colour; battery_scale__range_matches_asusctl_supported_range; gpu_temp__refresh_never_shows_placeholder_after_first_real_reading; current_monitor__picks_edp_even_when_listed_second
 
 ## FR-38 Python-to-Rust test mapping (67 rows)
 | Python test | Rust test |

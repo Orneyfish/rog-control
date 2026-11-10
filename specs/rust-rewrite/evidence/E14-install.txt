@@ -1,6 +1,6 @@
-$ bash $T/e14.sh   (verbatim from evals.md E14; src=$T/src copy of tracked files, HI=$T/inst, fake systemctl)
+$ E14 script from evals.md (clean-from-scratch build in a tracked-files copy, throwaway HOME, systemctl = logging fake); build output trimmed
 ==> building (cargo build --release --locked)
-    Finished `release` profile [optimized] target(s) in 30.53s
+    Finished `release` profile [optimized] target(s) in 31.24s
 ==> installing the binary to $T/inst/.local/bin/rog-control
 ==> installing icons under $T/inst/.local/share/icons/hicolor
 ==> writing $T/inst/.config/systemd/user/rog-control.service
@@ -23,5 +23,6 @@ $T/inst/.local/share/icons/hicolor/scalable/status/rog-control-symbolic.svg
 systemctl --user daemon-reload
 systemctl --user enable rog-control.service
 systemctl --user restart rog-control.service
-    Finished `release` profile [optimized] target(s) in 0.03s
+    Finished `release` profile [optimized] target(s) in 0.02s
 with --no-enable, systemctl calls: 0
+(crates compiled from scratch in the copy: 68; 'Finished release in 31.24s')

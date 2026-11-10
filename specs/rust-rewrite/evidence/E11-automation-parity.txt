@@ -1,4 +1,4 @@
-$ timeout 180 dbus-run-session -- bash $T/e11.sh   (verbatim from evals.md E11; Python reference = git worktree 509d5e4)
+$ timeout 180 dbus-run-session -- bash $T/e11.sh   (E11 script from evals.md; system is on AC power)
 --- python
 asusctl armoury set panel_overdrive 1
 asusctl leds set high
@@ -17,7 +17,6 @@ powerprofilesctl set performance
 identical
 writes: 5
 config untouched
-/bin/sh: line 1: kill: (1001053) - No such process
---- notify-send/systemctl-reboot lines: py=0 rust=0
---- stderr bytes: py=0 rust=0
---- power_supply online flags (all supplies): 1 0  (first = AC, 1 = on AC)
+rc=0
+notify-send/systemctl lines in either set: /tmp/claude-1000/-home-orneyfish-Projects-rog-control/a9cc1c8e-9e10-43a5-a5fc-a371a282def2/scratchpad/t3/rust.set:0 /tmp/claude-1000/-home-orneyfish-Projects-rog-control/a9cc1c8e-9e10-43a5-a5fc-a371a282def2/scratchpad/t3/py.set:0 
+rust stderr:

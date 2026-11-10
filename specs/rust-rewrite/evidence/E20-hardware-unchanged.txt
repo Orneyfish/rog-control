@@ -1,5 +1,10 @@
-$ specs/rust-rewrite/harness/hw-snapshot.sh > $T/hw.after; diff $T/hw.before $T/hw.after && echo hardware-unchanged; sha256sum -c $T/realcfg.sha
---- hw.before (taken at the start of this run, before any eval):
+$ specs/rust-rewrite/harness/hw-snapshot.sh > $T/hw.after; diff $T/hw.before $T/hw.after && echo hardware-unchanged; sha256sum -c $T/realcfg.sha   (run after E19, before E21)
+16c16
+< {"name":"eDP-1","width":2560,"height":1440,"refreshRate":240.00301}
+---
+> {"name":"eDP-1","width":2560,"height":1440,"refreshRate":60.00000}
+/home/orneyfish/.config/rog-control/config.json: OK
+--- hw.before
 /sys/firmware/acpi/platform_profile=performance
 /sys/class/firmware-attributes/asus-armoury/attributes/boot_sound/current_value=1
 /sys/class/firmware-attributes/asus-armoury/attributes/charge_mode/current_value=1
@@ -16,22 +21,24 @@ CPU: enabled: false, 47c:25%,51c:30%,55c:37%,59c:46%,63c:49%,67c:71%,71c:83%,97c
 GPU: enabled: true, 47c:14%,51c:22%,55c:35%,59c:46%,63c:55%,67c:74%,71c:90%,97c:100%
 performance
 {"name":"eDP-1","width":2560,"height":1440,"refreshRate":240.00301}
---- diff hw.before hw.after:
-16c16
-< {"name":"eDP-1","width":2560,"height":1440,"refreshRate":240.00301}
----
-> {"name":"eDP-1","width":2560,"height":1440,"refreshRate":60.00000}
-/home/orneyfish/.config/rog-control/config.json: OK
---- extra: sha256 of real keybinds.lua, keybinds.lua.pre-rust, rules.lua, installed unit, desktop entry before vs after:
-unchanged
-daafc416fa5bc7db9001dcae17b9a388960d5c7da0786d82e3eaa56197890a30  /home/orneyfish/.config/hypr/custom/keybinds.lua
-8d71f8ddc9b97f9fa84f1c51e732c70a43dbde191524babd6110951d89ea7780  /home/orneyfish/.config/hypr/custom/keybinds.lua.pre-rust
-0004b7328141ad28049a6b2334647a4cfbd0dad909b7fbb8b02ddf9f6ccfec1f  /home/orneyfish/.config/hypr/custom/rules.lua
-15ea1fa4079b3edf674df00074ff50adcdefd7b4e74d3ea6986297766b76538f  /home/orneyfish/.config/systemd/user/rog-control.service
-41291931ebdbca398bf28d4c47c475808a650b64627e247164efde0754301f1a  /home/orneyfish/.local/share/applications/com.orneyfish.RogControl.desktop
---- addendum: cause analysis (no extra hardware-writing commands were run)
-diff above: eDP-1 refreshRate 240.00301 -> 60.00000 between hw.before (start of run) and hw.after (after E19).
-Hyprland config ~/.config/hypr/hyprland/general.lua line 2-7: hl.monitor({output = "", mode = "preferred", position = "auto", scale = 1}) -> a 'hyprctl reload' (E19's last line) re-applies 'preferred' = 60 Hz over a runtime 240 Hz.
-hyprland.log: ... 'Modesetting eDP-1 with 2560x1440@240.00Hz' then '@60.00Hz' (the reload), and later '@240.00Hz' again when E21 started the real service (its startup automation runs 'hyprctl eval hl.monitor(... 240 ...)' on AC).
-After E21, snapshot == hw.before again (see E21-real-deployment.txt).
-All app runs used the fake tools, which log-and-block 'hyprctl eval' (see E11: the only hyprctl call that reached the real tool is 'monitors -j').
+--- hw.after
+/sys/firmware/acpi/platform_profile=performance
+/sys/class/firmware-attributes/asus-armoury/attributes/boot_sound/current_value=1
+/sys/class/firmware-attributes/asus-armoury/attributes/charge_mode/current_value=1
+/sys/class/firmware-attributes/asus-armoury/attributes/dgpu_disable/current_value=0
+/sys/class/firmware-attributes/asus-armoury/attributes/gpu_mux_mode/current_value=0
+/sys/class/firmware-attributes/asus-armoury/attributes/nv_dynamic_boost/current_value=
+/sys/class/firmware-attributes/asus-armoury/attributes/nv_temp_target/current_value=
+/sys/class/firmware-attributes/asus-armoury/attributes/panel_overdrive/current_value=1
+/sys/class/firmware-attributes/asus-armoury/attributes/ppt_pl1_spl/current_value=
+/sys/class/firmware-attributes/asus-armoury/attributes/ppt_pl2_sppt/current_value=
+/sys/class/power_supply/BAT0/charge_control_end_threshold=100
+/sys/class/leds/asus::kbd_backlight/brightness=3
+CPU: enabled: false, 47c:25%,51c:30%,55c:37%,59c:46%,63c:49%,67c:71%,71c:83%,97c:100%
+GPU: enabled: true, 47c:14%,51c:22%,55c:35%,59c:46%,63c:55%,67c:74%,71c:90%,97c:100%
+performance
+{"name":"eDP-1","width":2560,"height":1440,"refreshRate":60.00000}
+--- informational: after E21 (real service restarted, its startup automation re-applies the 240Hz preset) hw-snapshot vs hw.before:
+identical
+--- cause of the single differing line: E19's real 'hyprctl reload' left eDP-1 at 60 Hz (hyprctl monitors -j read right after the reload: {"name":"eDP-1","refreshRate":60.00000}); all fake-tool runs blocked every hyprctl eval (see E11 logs)
+--- (root cause) ~/.config/hypr/custom/general.lua:20-24 sets hl.monitor({output="desc:BOE 0x0A69", mode="preferred", ...}); a reload re-applies the preferred (60 Hz) mode over the app's earlier hyprctl eval 240Hz preset

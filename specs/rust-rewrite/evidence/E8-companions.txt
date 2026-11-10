@@ -1,4 +1,4 @@
-$ (E8 script from evals.md, run in E7 shell state: real session bus, real HOME, fake tools first on PATH, service started as in E7 lines 1-3)
+$ E8 check (continues E7 shell; real session bus; app restarted so first three lines redone)
 Fans and Power windows after second open: 1
 560 760 vs 560 760
 0.0000 0.0000
@@ -24,13 +24,13 @@ main close hides, service alive
 main reopens
 0.0000 0.0000
 reopened fans look-ok
---- reference geometry:
-shot ROG Control 494 913 1033 264
-shot Fans and Power 560 760 40 340
-shot Keyboard Lighting 380 480 40 480
-shot Extra 453 320 40 560
---- exact pixel compare (magick compare -metric AE) rust vs python capture: Fans 0, Lighting 0, Extra 0; sha256 identical:
-93f5e5c5f9f5d9cb 93f5e5c5f9f5d9cb Fans_and_Power
-e61739149e68e0eb e61739149e68e0eb Keyboard_Lighting
-556d1ecc72d00ac2 556d1ecc72d00ac2 Extra
---- e8.err bytes: 183
+e8.err (stderr of the app):
+
+(rog-control:8190): Gdk-WARNING **: 16:13:33.016: (../gtk/gdk/gdkframetimings.c:443):gdk_frame_timings_throttling_hint: runtime check failed: (self->result != GDK_FRAME_PREPARING)
+--- byte-level: rust companion PNGs sha256 vs python reference PNGs
+3d2d6e7d08f89b7b6e5e  rust/Fans_and_Power.png
+3d2d6e7d08f89b7b6e5e  refshots/Fans_and_Power.png
+6692b3066deff2823783  rust/Keyboard_Lighting.png
+6692b3066deff2823783  refshots/Keyboard_Lighting.png
+62902b34663cb12fdc35  rust/Extra.png
+62902b34663cb12fdc35  refshots/Extra.png

@@ -1,4 +1,4 @@
-$ bash $T/e19.sh   (verbatim from evals.md E19; run on the live Hyprland session, real HOME)
+$ E19 check from evals.md (includes a real hyprctl reload)
 1
 1
 108

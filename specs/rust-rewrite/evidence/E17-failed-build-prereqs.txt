@@ -1,14 +1,10 @@
-$ bash $T/e17.sh   (verbatim from evals.md E17; reuses HI=$T/inst2 fully installed, src=$T/src)
+$ E17 script from evals.md (HI=$T/inst2, a fully installed home)
 ==> building (cargo build --release --locked)
 cargo: simulated failure
 install.sh: the build failed; nothing was installed and the service was not touched.
 failed-build rc=1
 failed build: nothing changed
 systemctl state changes: 0
-ln: failed to create symbolic link '$T/nocargo/core_perl/core_perl': Permission denied
-ln: failed to create symbolic link '$T/nocargo/db5.3/db5.3': Permission denied
-ln: failed to create symbolic link '$T/nocargo/site_perl/site_perl': Permission denied
-ln: failed to create symbolic link '$T/nocargo/vendor_perl/vendor_perl': Permission denied
 no-cargo rc=1
 install.sh: missing prerequisites: cargo
 On Arch / CachyOS install them with:  sudo pacman -S rust gtk4 libadwaita
@@ -19,4 +15,3 @@ On Arch / CachyOS install them with:  sudo pacman -S rust gtk4 libadwaita
 Nothing was installed.
 prerequisite failures: nothing changed
 systemctl state changes: 0
---- (the 'ln: failed to create symbolic link ... core_perl' lines come from the eval text re-linking /usr/bin sub-directories into a pre-existing $T/nocargo; permission denied, nothing written, unrelated to the install)

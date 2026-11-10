@@ -1,13 +1,12 @@
-$ timeout 180 dbus-run-session -- bash $T/e2.sh   (script from evals.md E2, verbatim)
-run 1 ready in 1222 ms
+$ timeout 180 dbus-run-session -- bash $T/e2.sh   (E2 script from evals.md; portal/dbus-daemon log noise filtered)
+run 1 ready in 589 ms
 no window at boot
 .CycleProfile .CycleProfileBack .Open .OpenWindow 
-run 2 ready in 1072 ms
+run 2 ready in 464 ms
 no window at boot
 .CycleProfile .CycleProfileBack .Open .OpenWindow 
-run 3 ready in 1088 ms
+run 3 ready in 438 ms
 no window at boot
 .CycleProfile .CycleProfileBack .Open .OpenWindow 
 stdout bytes: 0  panics: 0
-/bin/sh: line 1: kill: (993455) - No such process
---- app stderr (e2.err): 0 bytes
+/bin/sh: line 1: kill: (4628) - No such process

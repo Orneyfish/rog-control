@@ -1,11 +1,10 @@
-$ cargo build --release --locked && ls -l target/release/rog-control && file target/release/rog-control && ldd target/release/rog-control | grep -ci python; git ls-files Cargo.lock; cargo clippy --all-targets --locked -- -D warnings; echo clippy=$?; grep -cE ...Cargo.toml
+$ cargo build --release --locked && ls -l target/release/rog-control && file target/release/rog-control && ldd target/release/rog-control | grep -ci python; git ls-files Cargo.lock; cargo clippy --all-targets --locked -- -D warnings; echo clippy=$?; grep -cE "^(tokio|async-std|smol|pyo3|cpython)" Cargo.toml
     Finished `release` profile [optimized] target(s) in 0.03s
-build_rc=0
--rwxr-xr-x 2 orneyfish orneyfish 1747528 Nov 10 12:05 target/release/rog-control
-target/release/rog-control: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, for GNU/Linux 6.1.0, BuildID[sha1]=4f66b1743c236e8a798e6fadccd863fd33449f01, not stripped
-python links: 0
+-rwxr-xr-x 2 orneyfish orneyfish 1764688 Nov 10 13:17 target/release/rog-control
+target/release/rog-control: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, for GNU/Linux 6.1.0, BuildID[sha1]=add34ff67714edffd23c0a480983dc5a3c96b21a, not stripped
+0
+chain-rc(last grep -c python; 1 means python count 0 so grep exits 1)=1
 Cargo.lock
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.07s
 clippy=0
-async/python deps: 0
-note: build/clippy were incremental cache hits at HEAD dd6f041 (sources unchanged); clean-build check is done in the E12/E13 scratch copy
+0

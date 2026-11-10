@@ -1,4 +1,4 @@
-$ bash $T/e18.sh   (verbatim from evals.md E18; reuses HI=$T/inst2)
+$ E18 script from evals.md (HI=$T/inst2)
 ==> stopping and disabling rog-control.service
 ==> removing installed files (config and *.pre-rust backups are kept)
 uninstall rc=0

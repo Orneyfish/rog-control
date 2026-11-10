@@ -1,4 +1,4 @@
-$ timeout 180 dbus-run-session -- bash $T/e3.sh   (verbatim from evals.md E3)
+$ timeout 180 dbus-run-session -- bash $T/e3.sh   (E3 script from evals.md)
 a) up with corrupt config
 a) config untouched
 b) window shown with no tools
@@ -7,8 +7,15 @@ c) answers while tools hang
 c) window within 2s
 c) answers with window open
 panics: 0
-/bin/sh: line 1: kill: (994403) - No such process
---- stderr bytes: a=0 b=215 c=215
---- b/c stderr content (private-bus a11y noise only, not a panic):
+rc=0
+--- stderr of runs:
+  0 /tmp/claude-1000/-home-orneyfish-Projects-rog-control/a9cc1c8e-9e10-43a5-a5fc-a371a282def2/scratchpad/t3/e3a.err
+213 /tmp/claude-1000/-home-orneyfish-Projects-rog-control/a9cc1c8e-9e10-43a5-a5fc-a371a282def2/scratchpad/t3/e3b.err
+213 /tmp/claude-1000/-home-orneyfish-Projects-rog-control/a9cc1c8e-9e10-43a5-a5fc-a371a282def2/scratchpad/t3/e3c.err
+426 total
+--- e3b.err:
 
-(rog-control:994622): Gtk-CRITICAL **: 12:13:19.987: Unable to register the application: GDBus.Error:org.freedesktop.DBus.Error.NameHasNoOwner: Could not activate remote peer 'org.a11y.atspi.Registry': unit failed
+(rog-control:5305): Gtk-CRITICAL **: 16:11:09.542: Unable to register the application: GDBus.Error:org.freedesktop.DBus.Error.NameHasNoOwner: Could not activate remote peer 'org.a11y.atspi.Registry': unit failed
+--- e3c.err:
+
+(rog-control:5555): Gtk-CRITICAL **: 16:11:12.957: Unable to register the application: GDBus.Error:org.freedesktop.DBus.Error.NameHasNoOwner: Could not activate remote peer 'org.a11y.atspi.Registry': unit failed

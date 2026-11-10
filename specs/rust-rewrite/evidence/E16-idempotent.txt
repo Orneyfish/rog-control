@@ -1,10 +1,10 @@
-$ bash $T/e16.sh   (verbatim from evals.md E16; home holds the Python-era unit/desktop copies)
-    Finished `release` profile [optimized] target(s) in 0.03s
+$ E16 script from evals.md
+    Finished `release` profile [optimized] target(s) in 0.11s
     Finished `release` profile [optimized] target(s) in 0.03s
 second install changed nothing
 unit backup is the exact original
 desktop backup is the exact original
 live unit replaced
-    Finished `release` profile [optimized] target(s) in 0.02s
+    Finished `release` profile [optimized] target(s) in 0.03s
 backup never overwritten
 1

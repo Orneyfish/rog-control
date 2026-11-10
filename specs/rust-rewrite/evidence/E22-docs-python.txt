@@ -1,28 +1,15 @@
-$ bash $T/e22.sh   (verbatim from evals.md E22; cwd = repo root)
---- output (awk prints nothing; lines below are: cargo test count, install.sh count, pre-rust count, 509d5e4 count, tracked .py outside specs/, ...)
+$ E22 script from evals.md
 3
 7
 4
 2
-config.py
-main.py
-tests/__init__.py
-tests/test_e2e.py
-py outside specs: 4
+py outside specs: 0
 history intact
 target
 target ignored
 feat/rust-rewrite
-3
---- git status --porcelain:
- M specs/rust-rewrite/RD.md
- M specs/rust-rewrite/harness/lib.sh
-?? specs/rust-rewrite/evidence/
---- git ls-files '*.py' (all):
-config.py
-main.py
-specs/rust-rewrite/harness/fake-watcher.py
-specs/rust-rewrite/harness/shoot_ref.py
-tests/__init__.py
-tests/test_e2e.py
---- expected: py outside specs: 0, and last count 0 -> NOT MET (4 tracked python files remain; RD.md and harness/lib.sh have uncommitted edits; plus the untracked evidence/ dir created by this test run)
+30
+--- cause of the non-zero last count: every dirty path is a tracked file under specs/rust-rewrite/evidence/ (round-1 evidence is tracked at HEAD and this run overwrote it):
+     31 M
+non-evidence dirty paths: 0
+dirty paths among src/ tests/ CLAUDE.md install.sh Cargo.*: 0
