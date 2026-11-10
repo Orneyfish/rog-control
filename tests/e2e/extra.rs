@@ -59,6 +59,7 @@ pub fn tests() -> Vec<(&'static str, fn())> {
         aura__led_mode_data_and_effect_commands,
         helpers__python_compatible_rounding_and_formatting,
         battery_text__charging_and_health,
+        theme__filters_only_known_environment_noise,
     ]
 }
 
@@ -707,4 +708,14 @@ fn battery_text__charging_and_health() {
     }
     let _s = sysfs_map(&[(BATTERY_ENERGY_FULL_PATH, "40000000"), (BATTERY_ENERGY_FULL_DESIGN_PATH, "50000000")]);
     assert_eq!(battery_health_text().as_deref(), Some("Battery Health: 80.0%"));
+}
+
+// guards: FR-12 - only the two known environment messages are dropped from the log, nothing else
+fn theme__filters_only_known_environment_noise() {
+    use rog_control::theme::is_environment_noise;
+    assert!(is_environment_noise("Theme parser error: gtk.css:312:16-28: Unknown name of pseudo-class"));
+    assert!(is_environment_noise("Unable to connect to the accessibility bus at 'unix:path=/run/user/1000/at-spi/bus_1': refused"));
+    assert!(!is_environment_noise("Theme parser error: <data>:3:1-5: Invalid property"), "errors in the app's own CSS must show");
+    assert!(!is_environment_noise("Attempting to read the value of a nonexistent property"));
+    assert!(!is_environment_noise(""));
 }

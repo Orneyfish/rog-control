@@ -176,7 +176,7 @@ impl AppState {
 
 /// Runs the resident service until it is quit.
 pub fn run() -> ExitCode {
-    theme::quiet_user_theme_warnings();
+    theme::quiet_environment_noise();
     let app = adw::Application::builder().application_id(APP_ID).build();
     let state = Rc::new(AppState {
         app: app.clone(),

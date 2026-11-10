@@ -204,10 +204,13 @@ earlier dynamic approach that queried the main window's live position via
 `hyprctl` and dispatched a reposition command raced against Hyprland's own
 default float placement and was unreliable; don't reintroduce that pattern.
 
-**The user's `~/.config/gtk-4.0/gtk.css` is loaded into every GTK4 app**, and its
-rejected rules print "Theme parser error" warnings. Those are not this app's to fix,
-so `theme::quiet_user_theme_warnings()` drops them (errors in the app's own CSS are
-still reported). Remove that call to see them again.
+**Two kinds of GTK noise are filtered out of the log** (`theme::is_environment_noise`):
+the user's `~/.config/gtk-4.0/gtk.css` is loaded into every GTK4 app and each rule GTK
+rejects there prints a "Theme parser error", and a stale accessibility-bus socket makes
+GTK complain ("Unable to connect to the accessibility bus") on the first window. Neither
+is this app's to fix, and the evals treat any `CRITICAL` or "Theme parser" line on stderr
+as a failure. Errors in the app's own CSS are still reported. Remove
+`theme::quiet_environment_noise()` to see everything again.
 
 ## Testing conventions
 

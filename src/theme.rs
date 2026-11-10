@@ -343,17 +343,21 @@ pub fn install_css() {
     gtk::style_context_add_provider_for_display(&display, &provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
 }
 
-/// GTK loads the user's `~/.config/gtk-4.0/gtk.css` into every GTK4 app and prints a
-/// "Theme parser error" for each rule it rejects. That file is not ours to fix (here its
-/// `row:insensitive` is GTK3 syntax), so those warnings are dropped; errors in this app's own CSS
-/// are reported by [`install_css`] instead. GTK logs through GLib's structured API, so this has
+/// GTK messages about this machine's environment rather than about this app, which the app cannot
+/// fix and which would otherwise be printed on every start: the user's
+/// `~/.config/gtk-4.0/gtk.css` is loaded into every GTK4 app and each rule GTK rejects there
+/// ("Theme parser error", here `row:insensitive`, which is GTK3 syntax) is reported, and a stale
+/// accessibility-bus socket makes GTK complain on the first window. Errors in this app's own CSS
+/// are reported by [`install_css`] instead.
+pub fn is_environment_noise(message: &str) -> bool {
+    message.starts_with("Theme parser error: gtk.css") || message.starts_with("Unable to connect to the accessibility bus")
+}
+
+/// Drops [`is_environment_noise`] from the log. GTK logs through GLib's structured API, so this has
 /// to be a log writer, and it must be installed before anything logs.
-pub fn quiet_user_theme_warnings() {
+pub fn quiet_environment_noise() {
     glib::log_set_writer_func(|level, fields| {
-        let user_theme_noise = fields
-            .iter()
-            .any(|f| f.key() == "MESSAGE" && f.value_str().is_some_and(|m| m.starts_with("Theme parser error: gtk.css")));
-        if user_theme_noise {
+        if fields.iter().any(|f| f.key() == "MESSAGE" && f.value_str().is_some_and(is_environment_noise)) {
             glib::LogWriterOutput::Handled
         } else {
             glib::log_writer_default(level, fields)
