@@ -962,6 +962,8 @@ struct FakeAsusd {
     calls: RefCell<Vec<String>>,
     absent: std::cell::Cell<bool>,
     stuck: std::cell::Cell<bool>,
+    /// Objects whose `Get` times out while the rest of asusd answers.
+    slow: RefCell<Vec<&'static str>>,
 }
 
 impl FakeAsusd {
@@ -972,6 +974,7 @@ impl FakeAsusd {
             calls: RefCell::default(),
             absent: std::cell::Cell::default(),
             stuck: std::cell::Cell::default(),
+            slow: RefCell::default(),
         })
     }
 
@@ -1000,6 +1003,7 @@ impl FakeAsusd {
                     let nodes: String = fake.children.borrow().iter().map(|c| format!(r#"<node name="{c}"><interface name="xyz.ljones.Aura"/></node>"#)).collect();
                     Ok((format!(r#"<node><interface name="org.freedesktop.DBus.Properties"/>{nodes}</node>"#),).to_variant())
                 }
+                "Get" if fake.slow.borrow().iter().any(|n| path.ends_with(n)) => Err(gtk::glib::Error::new(gtk::gio::IOErrorEnum::TimedOut, "Timeout was reached")),
                 "Get" => match fake.answering.borrow().iter().find(|(p, _)| p == path) {
                     Some((_, data)) => Ok((data.clone(),).to_variant()), // `(v)`: the property value, boxed once
                     None => err(gtk::gio::DBusError::UnknownObject, &format!("Unknown object '{path}'")),
@@ -1069,6 +1073,15 @@ fn aura__read_fails_soft_when_nothing_answers() {
     assert_eq!(stuck.calls(), ["Get /xyz/ljones/aura/19b6_2_3"], "a timeout must not trigger a lookup");
     stuck.stuck.set(false);
     assert!(read_aura_state().is_some(), "reads again once asusd answers");
+    drop(_bus);
+
+    // Same while looking: the first object timing out ends the lookup, it does not queue up another second per object.
+    let slow = FakeAsusd::new(&["19b6_2_3", "19b6_2_4"]);
+    slow.answer("19b6_2_4", breathe_data("Med", "Right"));
+    slow.slow.borrow_mut().push("19b6_2_3");
+    let _bus = slow.hook();
+    assert_eq!(read_aura_state(), None);
+    assert_eq!(slow.calls(), ["Introspect /xyz/ljones/aura", "Get /xyz/ljones/aura/19b6_2_3"], "went on to the next object after a timeout");
 }
 
 // guards: FR-19 - a remembered Aura object that stops answering (asusd re-exported it elsewhere) is looked up again

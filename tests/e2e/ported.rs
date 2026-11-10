@@ -202,6 +202,9 @@ fn colour_helpers__theme_colours_match_live_scheme() {
     // The path is spelled out here, not taken from the code under test: if scheme_json_path() were
     // wrong the colours below would no longer match the real file, and that must fail, not skip.
     let path = std::path::PathBuf::from(std::env::var_os("HOME").expect("HOME")).join(".local/state/caelestia/scheme.json");
+    // Checked before the fixture is looked at: where the live palette is read from does not depend
+    // on it, and on a machine whose scheme equals the built-in fallback the colours cannot show it.
+    assert_eq!(scheme_json_path(), path, "the app reads the live palette from the wrong file");
     let text = match std::fs::read_to_string(&path) {
         Ok(text) => text,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return skip("caelestia scheme.json not present on this machine"),
